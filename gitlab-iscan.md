@@ -6,7 +6,7 @@
 ### **(1) First to run elastio in any os you have to provide the credentials of the aws account holding our elastio stack so you will add the following as variables in your repo with thier values { aws_access_key_id , aws_secret_access_key,region } to secure your credintials** 
 ## **2-Deploy elastio inside your CI**
 ### **(1) In the CI we run the command { ``` mkdir ~/.aws && touch ~/.aws/config ~/.aws/credentials ``` } to create the folder that AWS reads its credentials from
-### **(2) then we run the second command ``````ich take the variables that we added to the repo and add them to the created  ~/.aws/config ~/.aws/credentials files
+### **(2) then we run the second command which take the variables that we added to the repo and adds them to the created  ~/.aws/config ~/.aws/credentials files
 ``` 
     - |
       cat << END_TEXT > ~/.aws/config

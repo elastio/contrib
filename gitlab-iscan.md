@@ -38,7 +38,7 @@
  ```
 
 ### **(5) we use iscan to scan the repo for any malware before building the project in the repo to make sure that our application is secure **
-#### - we have used elastio file backup function before  to backup a script named malware.py 
+#### - we have used `elastio file backup` function before  to backup a script named `malware.py`
 ```
 
 import json

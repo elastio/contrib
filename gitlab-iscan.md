@@ -23,7 +23,7 @@
 
 ```
 
-### **(3) we follow the elstio docs to install elastio so we run the following commands**
+### **(3) we follow the Elastio docs to install `elastio` so we run the following commands**
 ```
 - apt install unzip curl git wget -y
 - /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com elastio/elastio-stack/ master/scripts/install-elastio.sh)"

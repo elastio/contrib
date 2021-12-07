@@ -1,4 +1,4 @@
-# Migrate postgresql Database from on environment to another using elastio.
+# Migrate Postgres Database from one environment to another using Elastio
 ## **Problem:-**
 ## A common problem that slow down the software development cycle is that when  the developers developing the project they are working on the dev environment and then they migrate there work to staging or prod environment but when it comes to the database it becomes a hasling task for the database admin to make sure that everything is in sink all the time    
 ## **Solution:-**

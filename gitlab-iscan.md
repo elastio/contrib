@@ -53,7 +53,7 @@ else:
     raise SystemExit('Warning Threat Detected ')     
           
 ```
-and we will restore it and run it in the pipeline and this script exams the iscan results of our repo to assure that no malware was detected before building the project to docker image  or performing any action on it
+and we will restore it and run it in the pipeline and this script examines the iscan results of our repo to ensure that no malware was detected before building the project to docker image  or performing any action on it
 
 ```
 - echo "n" | iscan -N "iscan"  --for malware ~/repo 

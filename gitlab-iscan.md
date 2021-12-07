@@ -30,7 +30,7 @@
 - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64 zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install && apt install python3-pip -y
 - pip3 install --extra-index-url=https://dl.cloudsmith.io public/elastio/public/python/simple/  elastio-shell
 ```
-### **(4) we follow the elstio docs to install iscan**
+### **(4) we follow the Elastio docs to install `iscan`**
 ```
 - curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/elastio/elastio-stack/master/scripts/iscan > iscan
 - chmod +x iscan

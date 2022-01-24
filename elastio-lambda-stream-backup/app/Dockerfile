@@ -3,11 +3,11 @@ ARG REGISTRY=public.ecr.aws/elastio-dev/
 
 # Possible values: amd64 or arm64
 ARG ARCH=arm64
-# Version elastio cli what will use like base image
+# Version elastio cli what will use like base image.
+# Most likely this is not the latest version of elastio cli.
+# You can find the latest version at this link.
+# https://gallery.ecr.aws/elastio-dev/elastio-cli
 ARG VERSION_TAG=0.8.0-master
-
-# elastio cli version what be use in the imege(should be the same with red-stack version)
-# to check stack version use command "aws ssm get-parameter --name /elastio/region-stack/version"
 FROM ${REGISTRY}elastio-cli:${VERSION_TAG}-${ARCH}
 
 RUN apt-get update && apt-get upgrade -y

@@ -2,7 +2,7 @@
 
 > Before starting, please check do you have aws-cliv2, and docker cli installed.
 
-1. From AWS console, select IAM, select Roles then create IAM role with "ElastioLocalBackup".
+1. From AWS console, select IAM, select Roles then create IAM role with "ElastioFullAdmin".
 
 2. From the AWS console, select ECR and create an ECR repository for storing your docker image.
 

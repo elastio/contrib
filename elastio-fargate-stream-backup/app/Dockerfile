@@ -16,6 +16,7 @@ COPY requirements.txt  ./
 RUN pip3 install --no-cache-dir -r requirements.txt
 COPY app.py ./
 COPY s3reader.py ./
+COPY config_file.py ./
 
 ENTRYPOINT [  ]
 CMD python3 app.py

@@ -1,20 +1,21 @@
-import os
-import flask
-from flask import Flask, render_template, request
+import os, logging
+from config_file import *
 
-app = Flask(__name__)
+logging.basicConfig(
+    format='%(process)d-%(levelname)s-%(message)s',
+    level=logging.INFO,
+    )
 
-@app.route('/', methods=['GET'])
-def backup():
-    if request.values:
-        if request.values.get('bucket_name') and \
-            request.values.get('file_key') and \
-                request.values.get('vault_name') and \
-                    request.values.get('stream_name'):
-            status = os.system(f"python3 s3reader.py --bucket_name {request.values.get('bucket_name')} --file_key {request.values.get('file_key')} | elastio stream backup --stream-name {request.values.get('stream_name')} --vault {request.values.get('vault_name')}")
-            return {"statusCommand": status, "status": 200, "msg": "The file was streamed successfully!."} 
-    return {"statusCommand":"statusCommand", "status": 200, "msg": "Enter payload data..."}
+
+def backup(bucket_name, file_key, stream_name, vault):
+    logging.info("Stream backup from s3 will start.")
+    logging.info("Bucket name: %s" % bucket_name)
+    logging.info("File key: %s" % file_key)
+    logging.info("Stream name: %s" % stream_name)
+    logging.info("Vault name: %s" % vault)
+    status = os.system(f"python3 s3reader.py --bucket_name {bucket_name} --file_key {file_key} | elastio stream backup --stream-name {stream_name} --vault {vault}")
+    logging.info(f"Task status code: {status}")
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host="0.0.0.0")
+    backup(BUCKER_NAME, FILE_KEY, STREAM_NAME, VAULT)

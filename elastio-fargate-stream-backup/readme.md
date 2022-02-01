@@ -22,10 +22,11 @@
     > if you use the arm64/amd64 architecture, use an instance with the same architecture that you used to build the image.
     > Before you start this section, review the dockerfile and read its comments. In the comments you will see the possible values for arguments such as ARCH(architecture), VERSION_TAG(elastio cli version)
     > You can find the latest version at this link. https://gallery.ecr.aws/elastio-dev/elastio-cli
-    1. Register your docker cli by getting the ecr public image with the command:
+    1. Edit file contrib/elastio-fargate-stream-backup/app/config_file.py and put data about s3 bucket and file what will backup.
+    2. Register your docker cli by getting the ecr public image with the command:
         ```aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws```
         
-    2. Open your ECR repository that we created earlier and press the option "View push commands".  The screen will list four commands. Run them in your terminal to build the docker image.
+    3. Open your ECR repository that we created earlier and press the option "View push commands".  The screen will list four commands. Run them in your terminal to build the docker image.
 3. Create a Fargate Cluster.
     1. From AWS console, select `Elastic Container Service`, select `Create Cluster`.
     2. Under Select cluster template, select networking only.

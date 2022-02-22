@@ -7,12 +7,6 @@ def _is(s):
     return True if "elastio" in s.lower() else False
 
 
-def _confirm():
-    r = input("Delete resource?").lower
-    if r == "y" or r == "yes":
-        return True
-
-
 def scan_ec2(d, r):
     c = boto3.client("ec2", region_name=r)
     count = 0
@@ -20,10 +14,22 @@ def scan_ec2(d, r):
     for lt in res["LaunchTemplates"]:
         if _is(lt["LaunchTemplateName"]):
             count += 1
-            if d and _confirm():
+            if d:
                 c.delete_launch_template(LaunchTemplateName=lt["LaunchTemplateName"])
                 print("Deleted", lt["LaunchTemplateName"])
     print(f"{count} EC2 Launch Templates Discovered")
+
+def scan_ec2_asg(d,r):
+    c = boto3.client("autoscaling", region_name=r)
+    count = 0
+    res = c.describe_auto_scaling_groups()
+    for asg in res['AutoScalingGroups']:
+        if _is(asg['AutoScalingGroupName']):
+            count +=1
+            if d:
+                c.delete_auto_scaling_group(AutoScalingGroupName=asg['AutoScalingGroupName'])
+    print(f"{count} Auto Scaling Groups Discovered")
+
 
 
 def scan_cloudwatch(d, r):
@@ -39,7 +45,7 @@ def scan_cloudwatch(d, r):
     for alarm in res["MetricAlarms"]:
         if _is(alarm["AlarmName"]):
             count += 1
-            if d and _confirm():
+            if d:
                 c.delete_alarms(AlarmNames=[alarm["AlarmName"]])
     print(f"{count} Cloudwatch Alarms Detected")
 
@@ -52,7 +58,7 @@ def scan_event_bridge(d, r):
         if _is(re["Name"]):
             count += 1
             targets = c.list_targets_by_rule(Rule=re["Name"])
-            if d and _confirm():
+            if d:
                 for t in targets["Targets"]:
                     c.remove_targets(Rule=re["Name"], Ids=[t["Id"]])
                     time.sleep(1)
@@ -71,7 +77,7 @@ def scan_ssm(d, r):
     for p in res["Parameters"]:
         if _is(p["Name"]):
             count += 1
-            if d and _confirm():
+            if d:
                 c.delete_parameter(Name=p["Name"])
     print(f"{count} SSM Parameters Detected")
 
@@ -85,7 +91,7 @@ def scan_autoscaling_plans(d, r):
             for val in tags["Values"]:
                 if _is(val):
                     count += 1
-                    if d and _confirm():
+                    if d:
                         c.delete_scaling_plan(
                             ScalingPlanName=sp["ScalingPlanName"], ScalingPlanVersion=1
                         )
@@ -99,7 +105,8 @@ def scan_lambda(d, r):
     for f in lf["Functions"]:
         if _is(f["FunctionName"]):
             count += 1
-            if d and _confirm():
+            if d:
+                print(f'Deleting Lambda Function...')
                 c.delete_function(FunctionName=f["FunctionName"])
     print(f"{count} Lambda Functions Detected")
 
@@ -111,7 +118,7 @@ def scan_cloudformation(d, r):
     for s in res["StackSummaries"]:
         if _is(s["StackName"]) and s["StackStatus"] != "DELETE_COMPLETE":
             count += 1
-            if d and s["StackStatus"] and _confirm():
+            if d and s["StackStatus"]:
                 c.delete_stack(StackName=s["StackName"])
     print(f"{count} Cloudformation Stacks Detected")
 
@@ -123,7 +130,7 @@ def scan_sns(d, r):
     for t in res["Topics"]:
         if _is(t["TopicArn"]):
             count += 1
-            if d and _confirm():
+            if d:
                 c.delete_topic(TopicArn=t["TopicArn"])
     print(f"{count} SNS Topics Detected")
 
@@ -138,7 +145,7 @@ def scan_sqs(d, r):
         for q in res["QueueUrls"]:
             if _is(q):
                 count += 1
-                if d and _confirm():
+                if d:
                     c.delete_queue(QueueUrl=q)
 
     print(f"{count} SQS Queues Detected")
@@ -150,8 +157,9 @@ def scan_ecs(d, r):
     res = c.list_clusters()
     for arn in res["clusterArns"]:
         if _is(arn):
+            print(arn)
             count += 1
-            if d and _confirm():
+            if d:
                 print("No Destructors Found for ECS. Please delete manually and rerun")
     print(f"{count} ECS Clusters Detected")
 
@@ -167,7 +175,7 @@ def scan_kms(d, r):
         for a in ka["Aliases"]:
             if _is(a["AliasName"]) and keyState != "PendingDeletion":
                 count += 1
-                if d and _confirm():
+                if d:
                     c.disable_key(KeyId=k["KeyId"])
                     c.schedule_key_deletion(KeyId=k["KeyId"], PendingWindowInDays=7)
     print(f"{count} KMS Keys Detected")
@@ -181,7 +189,7 @@ def scan_batch(d, r):
         if _is(j["jobQueueName"]):
             count += 1
             jq = j["jobQueueArn"]
-            if d and _confirm():
+            if d:
                 c.update_job_queue(jobQueue=jq, state="DISABLED")
                 time.sleep(10)
                 c.delete_job_queue(jobQueue=j["jobQueueArn"])
@@ -193,16 +201,16 @@ def scan_batch(d, r):
         if _is(j["jobDefinitionName"]) and j["status"] != "INACTIVE":
             count += 1
             jd = j["jobDefinitionArn"]
-            if d and _confirm():
+            if d:
                 c.deregister_job_definition(jobDefinition=jd)
     print(f"{count} Batch Jobs Definitions Detected")
 
     count = 0
     res = c.describe_compute_environments()
     for j in res["computeEnvironments"]:
-        count += 1
         if _is(j["computeEnvironmentName"]):
-            if d and _confirm():
+            count += 1
+            if d:
                 c.update_compute_environment(
                     computeEnvironment=j["computeEnvironmentArn"], state="DISABLED"
                 )
@@ -213,8 +221,29 @@ def scan_batch(d, r):
     print(f"{count} Batch Compute Environments Detected")
 
 
+def scan_s3(d, r):
+    count = 0
+    c = boto3.client("s3", region_name=r)
+    response = c.list_buckets()
+    for b in response["Buckets"]:
+        if _is(b["Name"]) or 'cf-templates' in b["Name"]:
+            count += 1
+            if d:
+                s3 = boto3.resource('s3')
+                bucket = s3.Bucket(b['Name'])
+                bucket.objects.all().delete()
+                c.delete_bucket(Bucket=b["Name"])
+
+    print(f"{count} S3 Bucket Detected")
+
+
+def scan_iam(d, r):
+    pass
+
+
 def scan(event, context):
     scan_ec2(event.destroy, event.region)
+    scan_ec2_asg(event.destroy, event.region)
     scan_cloudwatch(event.destroy, event.region)
     scan_event_bridge(event.destroy, event.region)
     scan_lambda(event.destroy, event.region)
@@ -222,6 +251,11 @@ def scan(event, context):
     scan_sns(event.destroy, event.region)
     scan_sqs(event.destroy, event.region)
     scan_ssm(event.destroy, event.region)
-    scan_ecs(event.destroy, event.region)
     scan_kms(event.destroy, event.region)
     scan_batch(event.destroy, event.region)
+    scan_ecs(event.destroy, event.region)
+
+
+def scan_globals(event, context):
+    scan_s3(event.destroy, event.region)
+    scan_iam(event.destroy, event.region)

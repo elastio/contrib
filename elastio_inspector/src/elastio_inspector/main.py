@@ -1,6 +1,6 @@
 import argparse
 
-from elastio_inspector.handler import scan
+from elastio_inspector.handler import scan, scan_globals
 
 
 def main():
@@ -35,10 +35,6 @@ def main():
 
     args = parser.parse_args()
 
-    if args.globals:
-        print("Globals Scan Not Implemented. Exiting")
-        exit(1)
-
     if args.auto_approve:
         print("Auto approve is not implemented. Proceeding without auto-approve")
 
@@ -46,6 +42,9 @@ def main():
         print("Running in destruction mode.")
 
     scan(args, None)
+
+    if args.globals:
+        scan_globals(args, None)
 
 
 if __name__ == "__main__":

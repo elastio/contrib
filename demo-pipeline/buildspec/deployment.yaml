@@ -1,0 +1,28 @@
+version: 0.2
+env:
+  secrets-manager:
+    PGHOST: myapp/database/prod/credentials:hostname
+    PGPORT: myapp/database/prod/credentials:port
+    PGUSER: myapp/database/prod/credentials:username
+    PGPASSWORD: myapp/database/prod/credentials:password
+    PGDATABASE: myapp/database/prod/credentials:database
+phases:
+  install:
+    commands:
+      - curl -o - https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor > /usr/share/keyrings/pgdg-archive-keyring.gpg
+      - RELEASE=$(awk -F= '/^UBUNTU_CODENAME/ {print $NF}' /etc/os-release)
+      - echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt/ ${RELEASE}-pgdg main" >/etc/apt/sources.list.d/pgdg.list
+      - apt update
+      - apt -yq install jq curl gnupg postgresql-client-13
+      - curl -OfsSL https://raw.githubusercontent.com/elastio/elastio-stack/master/scripts/install-elastio.sh
+      - chmod a+x install-elastio.sh
+      - ./install-elastio.sh -c
+  build:
+    commands:
+      - echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+      - echo "!!!"
+      - echo "!!! Oh no, our deployment failed!  Let's restore from backup"
+      - echo "!!!"
+      - echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+      - elastio ec2 restore --rp $INSTANCE_RP_ID
+      - elastio stream restore --rp $DB_RP_ID | psql

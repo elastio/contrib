@@ -1,0 +1,34 @@
+version: 0.2
+
+env:
+  variables:
+    ELASTIO_IMAGE: public.ecr.aws/elastio-dev/elastio-cli:0.9.0-master-amd64
+  exported-variables:
+    - JOB_ID
+    - ABORT_TOKEN
+    - INSTANCE_ID
+  # secrets-manager:
+  #   AWS_ACCESS_KEY_ID: codebuild/backup/creds:access_key_id
+  #   AWS_SECRET_ACCESS_KEY: codebuild/backup/creds:secret_access_key
+
+phases:
+  install:
+    commands:
+      - apt update
+      - apt -yq install jq
+      - curl -OfsSL https://raw.githubusercontent.com/elastio/elastio-stack/master/scripts/install-elastio.sh
+      - chmod a+x install-elastio.sh
+      - ./install-elastio.sh -c
+
+  build:
+    commands:
+      - export INSTANCE_ID=$(aws ec2 describe-instances | jq -r --arg env $ENVIRONMENT '.Reservations[].Instances[] | select(.Tags[].Key == "Environment" and .Tags[].Value == $env) | .InstanceId' )
+      - echo "Backing up instance ${INSTANCE_ID}"
+      - OUTPUT=$(elastio ec2 backup --instance-id $INSTANCE_ID --tag relase:$CODEBUILD_RESOLVED_SOURCE_VERSION --output-format json)
+      - echo "${OUTPUT}"
+      - export JOB_ID=$(echo "${OUTPUT}" | jq -r '.job_id')
+      - export ABORT_TOKEN=$(echo "${OUTPUT}" | jq -r '.abort_token')
+
+  post_build:
+    commands:
+      - echo "***************************\n* JOB_ID is $JOB_ID\n*\n* ABORT_TOKEN is $ABORT_TOKEN\n***************************"

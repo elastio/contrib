@@ -1,0 +1,11 @@
+Metadata-Version: 1.2
+Name: atlassian-backup
+Version: 1.0.0
+Summary: Backup Atlassian Using Elastio
+Home-page: UNKNOWN
+Author: Vihar Chokshi
+Author-email: vc@iot4.net
+License: UNKNOWN
+Description: UNKNOWN
+Platform: UNKNOWN
+Requires-Python: >=3.7.0

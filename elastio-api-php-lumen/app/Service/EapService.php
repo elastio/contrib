@@ -101,9 +101,15 @@ class EapService
      * @param $json
      * @return JsonResponse
      */
+
+    private static function sanitizeUserInput($value)
+    {
+        return preg_replace("/[^a-zA-Z0-9-]+/", "", $value);
+    }
+
     public static function newEc2Backup($json): JsonResponse
     {
-        $instanceID = $json['instanceID'];
+        $instanceID = self::sanitizeUserInput($json['instanceID']);
 
         $cmd = "cd /home/ubuntu && sudo elastio ec2 backup --instance-id {$instanceID} 2>&1; echo $?";
         $output = self::runShell($cmd);
@@ -118,7 +124,7 @@ class EapService
 
     public static function restoreEc2Backup($json): JsonResponse
     {
-        $recoveryID = $json['recoveryID'];
+        $recoveryID = self::sanitizeUserInput($json['recoveryID']);
 
         $cmd = "cd /home/ubuntu && sudo elastio ec2 restore --rp {$recoveryID} 2>&1; echo $?";
         $output = self::runShell($cmd);
@@ -143,7 +149,7 @@ class EapService
      */
     public static function newEbsBackup($json): JsonResponse
     {
-        $volumeID = $json['volumeID'];
+        $volumeID = self::sanitizeUserInput($json['volumeID']);
 
         $cmd = "cd /home/ubuntu && sudo elastio ebs backup --volume-id {$volumeID} 2>&1; echo $?";
         $output = self::runShell($cmd);
@@ -161,7 +167,7 @@ class EapService
      */
     public static function restoreEbsBackup($json): JsonResponse
     {
-        $recoveryID = $json['recoveryID'];
+        $recoveryID = self::sanitizeUserInput($json['recoveryID']);
         $cmd = "cd /home/ubuntu && sudo elastio ebs restore --rp {$recoveryID} 2>&1; echo $?";
         $output = self::runShell($cmd);
 
@@ -182,7 +188,7 @@ class EapService
 
     public static function iScanRp($json)
     {
-        $recoveryID = $json['recoveryID'];
+        $recoveryID = self::sanitizeUserInput($json['recoveryID']);
         $cmd = "cd /home/ubuntu && sudo elastio iscan --background --rp {$recoveryID} 2>&1; echo $?";
         $output = self::runShell($cmd);
 
@@ -236,19 +242,19 @@ class EapService
         $summary = $data['summary']['scan_summaries'][0]['summary'];
 
         $results = [
-          'malware' => [
-              'clean_files' => $summary['malware_scan']['clean'],
-              'corrupted_files' => $summary['malware_scan']['corrupted'],
-              'encrypted_files' => $summary['malware_scan']['encrypted'],
-              'incomplete_files' => $summary['malware_scan']['incomplete'],
-              'infected_files' => $summary['malware_scan']['infected'],
-              'suspicious_files' => $summary['malware_scan']['suspicious'],
-              'total_files' => $summary['malware_scan']['total'],
-          ],
-          'ransomware' => [
-              'suspicious_files' => $summary['ransomware_scan']['suspicious'],
-              'total_files' => $summary['ransomware_scan']['total'],
-          ]
+            'malware' => [
+                'clean_files' => $summary['malware_scan']['clean'],
+                'corrupted_files' => $summary['malware_scan']['corrupted'],
+                'encrypted_files' => $summary['malware_scan']['encrypted'],
+                'incomplete_files' => $summary['malware_scan']['incomplete'],
+                'infected_files' => $summary['malware_scan']['infected'],
+                'suspicious_files' => $summary['malware_scan']['suspicious'],
+                'total_files' => $summary['malware_scan']['total'],
+            ],
+            'ransomware' => [
+                'suspicious_files' => $summary['ransomware_scan']['suspicious'],
+                'total_files' => $summary['ransomware_scan']['total'],
+            ]
         ];
 
         return self::sendJsonResponse($results, '200');

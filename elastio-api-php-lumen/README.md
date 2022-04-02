@@ -23,7 +23,15 @@ If you discover a security vulnerability within Lumen, please send an e-mail to 
 
 The Lumen framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
 
+---
 # Elastio
+
+## Setup
+
+- Install elastio CLI to /home/ubuntu
+- Setup AWS CLI credentials in both /home/ubuntu/.aws and /root/.aws
+- Create the following folder: /var/www/iscan_temp and allow ubuntu.www-data to write.
+- Update visuders
 
 ## Permissions
 

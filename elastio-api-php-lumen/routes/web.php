@@ -18,15 +18,6 @@ $router->get('/', function () use ($router) {
 });
 
 $router->group(['prefix' => 'api'], function () use ($router) {
-    //$router->get('/instance', ['middleware' => 'auth', 'uses' => 'InstanceController@listInstance']);
-    //$router->post('/instance', ['middleware' => 'auth', 'uses' => 'InstanceController@newInstance']);
-    //$router->put('/instance/{id}', ['middleware' => 'auth', 'uses' => 'InstanceController@updateInstance']);
-    //$router->delete('/instance/{id}', ['middleware' => 'auth', 'uses' => 'InstanceController@deleteInstance']);
-
-    //$router->get('/elastio', ['middleware' => 'auth', 'uses' => 'ElastioController@listPending']);
-    //$router->post('/elastio/{id}', ['middleware' => 'auth', 'uses' => 'ElastioController@newPending']);
-    //$router->put('/elastio/{id}', ['middleware' => 'auth', 'uses' => 'ElastioController@processPending']);
-
     /* Elastio : EC2 (backup/restore) */
     $router->post('/ec2/new', ['middleware' => 'auth', 'uses' => 'Ec2BackupController@ec2Backup']);
     $router->post('/ec2/restore', ['middleware' => 'auth', 'uses' => 'Ec2BackupController@ec2Restore']);

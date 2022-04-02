@@ -5,7 +5,7 @@ Summary: Backup Atlassian Using Elastio
 Home-page: UNKNOWN
 Author: Vihar Chokshi
 Author-email: vc@iot4.net
-License: UNKNOWN
+License: 'MIT'
 Description: UNKNOWN
 Platform: UNKNOWN
 Requires-Python: >=3.7.0

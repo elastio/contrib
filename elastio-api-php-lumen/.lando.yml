@@ -1,0 +1,7 @@
+name: eapapi
+recipe: lamp
+config:
+  webroot: /public
+  database: mysql
+  php: '7.3'
+  xdebug: false

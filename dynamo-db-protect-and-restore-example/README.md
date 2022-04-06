@@ -66,3 +66,9 @@ elastio stream restore --rp rp-dg34vt9ouz4iphmo83hqxnno --to-file schema.json &&
 ```
 
 As a result you will find the table restored and ready for use.
+
+
+
+## LICENCE
+
+Elastio-specific modifications are Copyright 2022 Elastio Software, Inc, and are hereby released under the MIT License as was the original work upon which this version is derived (https://github.com/bchew/dynamodump).

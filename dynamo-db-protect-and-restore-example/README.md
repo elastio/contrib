@@ -2,13 +2,13 @@
 
 ## Create a DynamoDB table and write some data to it
 
-- In this step, you create a Music table in Amazon DynamoDB. The table has the following details:
+- Create a "Music" table in Amazon DynamoDB. The table should have the following details:
 
     Partition key — Artist
 
     Sort key — SongTitle
 
-- The following AWS CLI example creates a new Music table using create-table.
+- Create a new "Music" table using create-table as in the following AWS CLI example below:
 
 ```
 aws dynamodb create-table \
@@ -25,7 +25,10 @@ aws dynamodb create-table \
 ```
 ![set up project](https://i.postimg.cc/MGnM0nrv/1111.png)
 
-- The following AWS CLI example creates several new items in the Music table. You can do this either through the DynamoDB API or PartiQL, a SQL-compatible query language for DynamoDB:
+## Fill the DynamoDB table with data ##
+
+- Use the following AWS CLI example to create several new items in the "Music" table. You can do this either through the DynamoDB API or PartiQL, a SQL-compatible query language for DynamoDB:
+
 ```
 aws dynamodb put-item \
     --table-name Music  \
@@ -48,8 +51,9 @@ aws dynamodb put-item \
         '{"Artist": {"S": "Acme Band"}, "SongTitle": {"S": "PartiQL Rocks"}, "AlbumTitle": {"S": "Another Album Title"}, "Awards": {"N": "8"} }'
 ```
 
+## Protect and restore DynamoDB table with Elastio
 
-## Use Elastio and the script provided in this folder to Backup and Restore the Music table
+Use the following [script](https://github.com/elastio/contrib/blob/master/dynamo-db-protect-and-restore-example/DynamoElastio.py) to protect and restore the "Music" table. 
 
 Run the following command to backup the table schema and data using `elastio file backup` command in the CLI:
 
@@ -66,8 +70,6 @@ elastio stream restore --rp rp-dg34vt9ouz4iphmo83hqxnno --to-file schema.json &&
 ```
 
 As a result you will find the table restored and ready for use.
-
-
 
 ## LICENSE
 

@@ -10,10 +10,3 @@
 
 # Built Visual Studio Code Extensions
 *.vsix
-
-# Python development directories
-elastio-lambda-stream-backup/venv
-elastio-lambda-stream-backup/__pycache__
-
-elastio-fargate-stream-backup/venv
-elastio-fargate-stream-backup/__pycache__

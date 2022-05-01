@@ -13,5 +13,5 @@ phases:
   build:
     commands:
       - echo "**********\n*\n* Waiting for job $JOB_ID\n*\n**********\n"
-      - pupeline-demo/scripts/job-wait.sh ${JOB_ID}
+      - demo-pipeline/scripts/job-wait.sh ${JOB_ID}
       - if [ -f rp_id ]; then export INSTANCE_RP_ID=$(cat rp_id); else exit 127; fi

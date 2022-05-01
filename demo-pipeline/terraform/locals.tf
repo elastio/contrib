@@ -4,7 +4,7 @@ locals {
       buildspec : "demo-pipeline/buildspec/instance-backup.yaml"
       description : "Run a backup of an EC2 Instance"
     },
-    StubDeployment : {
+    MockDeployment : {
       buildspec : "demo-pipeline/buildspec/deployment.yaml"
       description : "Run an intentionall failed deployment and demonstrate in-pipeline recovery"
     },

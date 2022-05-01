@@ -42,7 +42,7 @@ resource "aws_codepipeline" "pipe" {
       version          = 1
       output_artifacts = ["SourceArtifact"]
       run_order        = 1
-      region           = "us-east-2"
+      region           = var.region
       namespace        = "SourceVariables"
 
       configuration = {
@@ -66,11 +66,17 @@ resource "aws_codepipeline" "pipe" {
       version         = 1
       input_artifacts = ["SourceArtifact"]
       run_order       = 1
-      region          = "us-east-2"
+      region          = var.region
       namespace       = "InstanceBackup"
 
       configuration = {
         ProjectName = "EC2InstanceBackup"
+        EnvironmentVariables = jsonencode(
+          [{
+            name  = "ENVIRONMENT"
+            type  = "PLAINTEXT"
+            value = "demo"
+        }])
       }
     }
 
@@ -82,11 +88,17 @@ resource "aws_codepipeline" "pipe" {
       version         = 1
       input_artifacts = ["SourceArtifact"]
       run_order       = 1
-      region          = "us-east-2"
+      region          = var.region
       namespace       = "DatabaseBackup"
 
       configuration = {
         ProjectName = "DatabaseBackup"
+        EnvironmentVariables = jsonencode(
+          [{
+            name  = "ENVIRONMENT"
+            type  = "PLAINTEXT"
+            value = "demo"
+        }])
       }
     }
   }
@@ -102,12 +114,21 @@ resource "aws_codepipeline" "pipe" {
       version         = 1
       input_artifacts = ["SourceArtifact"]
       run_order       = 1
-      region          = "us-east-2"
+      region          = var.region
       namespace       = "BackupWaiter"
 
       configuration = {
-        EnvironmentVariables = jsonencode(local.event_arguments)
-        ProjectName          = "WaitForBackup"
+        EnvironmentVariables = jsonencode([{
+          name  = "JOB_ID"
+          type  = "PLAINTEXT"
+          value = "#{InstanceBackup.JOB_ID}"
+          },
+          {
+            name  = "ABORT_TOKEN"
+            type  = "PLAINTEXT"
+            value = "#{InstanceBackup.ABORT_TOKEN}"
+        }])
+        ProjectName = "WaitForBackup"
       }
     }
   }
@@ -116,7 +137,7 @@ resource "aws_codepipeline" "pipe" {
     name = "Deployment"
 
     action {
-      name             = "AttemptDeployment"
+      name             = "MockDeployment"
       category         = "Build"
       owner            = "AWS"
       provider         = "CodeBuild"
@@ -124,12 +145,12 @@ resource "aws_codepipeline" "pipe" {
       input_artifacts  = ["SourceArtifact"]
       output_artifacts = ["BuildArtifact"]
       run_order        = 1
-      region           = "us-east-2"
+      region           = var.region
       namespace        = "Deployment"
 
       configuration = {
         EnvironmentVariables = jsonencode(local.event_arguments)
-        ProjectName          = "StubDeployment"
+        ProjectName          = "MockDeployment"
       }
     }
   }

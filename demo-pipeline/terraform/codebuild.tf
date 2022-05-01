@@ -4,7 +4,7 @@ resource "aws_codebuild_project" "steps" {
   name           = each.value
   service_role   = aws_iam_role.codebuild_service[each.value].arn
   description    = local.project_properties[each.value]["description"]
-  encryption_key = "arn:aws:kms:us-east-2:489999593185:alias/aws/s3"
+  encryption_key = "arn:aws:kms:${var.region}:489999593185:alias/aws/s3"
 
   source {
     buildspec       = local.project_properties[each.value]["buildspec"]

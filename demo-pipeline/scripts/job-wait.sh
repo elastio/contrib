@@ -18,3 +18,4 @@ while true; do
   fi
   sleep $(( RANDOM % 15 ))
 done
+w

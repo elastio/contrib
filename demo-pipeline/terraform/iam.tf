@@ -26,13 +26,21 @@ data "aws_iam_policy_document" "codepipeline_trust" {
 
 data "aws_iam_policy_document" "codebuild_service" {
   statement {
-    sid     = "CloudWatchLogsAccess"
-    effect  = "Allow"
-    actions = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-    resources = [
-      "arn:aws:logs:us-east-2:48999593185:log-group:/aws/codebuild/DatabaseBackup",
-      "arn:aws:logs:us-east-2:48999593185:log-group:/aws/codebuild/DatabaseBackup:*"
+    sid    = "CloudWatchLogsAccess"
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
     ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid       = "DBSecretsManagerActions"
+    effect    = "Allow"
+    actions   = ["secretsmanager:Get*"]
+    resources = [aws_secretsmanager_secret.db.arn]
   }
 
   statement {
@@ -46,7 +54,7 @@ data "aws_iam_policy_document" "codebuild_service" {
       "s3:GetBucketLocation"
     ]
     resources = [
-      "arn:aws:s3:::codepipeline-us-east-2-*"
+      "arn:aws:s3:::codepipeline-*"
     ]
   }
 
@@ -59,6 +67,15 @@ data "aws_iam_policy_document" "codebuild_service" {
       "codebuild:UpdateReport",
       "codebuild:BatchPutTestCases",
       "codebuild:BatchPutCodeCoverages"
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid    = "EC2Actions"
+    effect = "Allow"
+    actions = [
+      "ec2:Describe*"
     ]
     resources = ["*"]
   }
@@ -254,6 +271,13 @@ resource "aws_iam_role_policy_attachment" "service" {
 
   role       = aws_iam_role.codebuild_service[each.value].name
   policy_arn = aws_iam_policy.codebuild_service[each.value].arn
+}
+
+resource "aws_iam_role_policy_attachment" "service2" {
+  for_each = toset(local.codebuild_projects)
+
+  role       = aws_iam_role.codebuild_service[each.value].name
+  policy_arn = data.aws_iam_policy.elastio_access.arn
 }
 
 resource "aws_iam_policy" "pipeline_service" {

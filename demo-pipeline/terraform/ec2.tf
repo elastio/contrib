@@ -92,4 +92,8 @@ resource "aws_instance" "test_instance" {
   vpc_security_group_ids      = [aws_security_group.elastio_instance.id]
   user_data_base64            = data.template_cloudinit_config.ec2_config.rendered
   subnet_id                   = data.aws_subnets.default.ids[0]
+
+  tags = {
+    Environment = "demo"
+  }
 }

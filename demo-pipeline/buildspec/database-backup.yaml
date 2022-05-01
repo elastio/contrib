@@ -5,11 +5,11 @@ env:
     - ABORT_TOKEN
     - DB_RESTORE_POINT
   secrets-manager:
-    PGHOST: myapp/database/prod/credentials:hostname
-    PGPORT: myapp/database/prod/credentials:port
-    PGUSER: myapp/database/prod/credentials:username
-    PGPASSWORD: myapp/database/prod/credentials:password
-    PGDATABASE: myapp/database/prod/credentials:database
+    PGHOST: demoapp/database/demo/credentials:hostname
+    PGPORT: demoapp/database/demo/credentials:port
+    PGUSER: demoapp/database/demo/credentials:username
+    PGPASSWORD: demoapp/database/demo/credentials:password
+    PGDATABASE: demoapp/database/demo/credentials:database
 phases:
   install:
     commands:

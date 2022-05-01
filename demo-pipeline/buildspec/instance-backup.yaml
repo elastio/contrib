@@ -1,15 +1,9 @@
 version: 0.2
 
 env:
-  variables:
-    ELASTIO_IMAGE: public.ecr.aws/elastio-dev/elastio-cli:0.9.0-master-amd64
   exported-variables:
     - JOB_ID
     - ABORT_TOKEN
-    - INSTANCE_ID
-  # secrets-manager:
-  #   AWS_ACCESS_KEY_ID: codebuild/backup/creds:access_key_id
-  #   AWS_SECRET_ACCESS_KEY: codebuild/backup/creds:secret_access_key
 
 phases:
   install:
@@ -22,7 +16,7 @@ phases:
 
   build:
     commands:
-      - export INSTANCE_ID=$(aws ec2 describe-instances | jq -r --arg env $ENVIRONMENT '.Reservations[].Instances[] | select(.Tags[].Key == "Environment" and .Tags[].Value == $env) | .InstanceId' )
+      - export INSTANCE_ID=$(aws ec2 describe-instances | jq -r --arg env $ENVIRONMENT '.Reservations[].Instances[] | select(.Tags != null) | select(.Tags[].Key == "Environment" and .Tags[].Value == $env) | .InstanceId')
       - echo "Backing up instance ${INSTANCE_ID}"
       - OUTPUT=$(elastio ec2 backup --instance-id $INSTANCE_ID --tag relase:$CODEBUILD_RESOLVED_SOURCE_VERSION --output-format json)
       - echo "${OUTPUT}"

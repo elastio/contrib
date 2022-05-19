@@ -67,20 +67,34 @@ tables = {
 }
 ```
 
-## Running the script
+## Backup
 
 ```
-bash mysql-anonymized-data.sh DATABASE_NAME BACKUP_FILE_NAME
+bash mysql-anonymized-data.sh DATABASE_NAME RECOVERY_FILE_NAME
 ```
 
 > Parameters:
 - Replace "DATABASE_NAME" with the name of your database.
-- Replace "BACKUP_FILE_NAME" with the file name you would like stored in the Elastio vault. IE: database-backup.sql
+- Replace "RECOVERY_FILE_NAME" with the file name you would like stored in the Elastio vault. IE: database-backup.sql
 
 ## Expected results
 
 The fields first, last, email, ssn and dob data would be replaced in the Elastio vault with hashed values according to the myanon config file.
 
+Elastio stream will return the recovery-id for the backup point.
+
+## Recovery
+
+Run the following script to recover the anonymized SQL file from the Elastio vault:
+
+```
+bash restore-anonymized-data.sh RECOVERY_POINT RECOVERY_FILE_NAME
+```
+
+> Parameters:
+- Replace "RECOVERY_POINT" with the recovery ID returned from Elastio.
+- Replace "RECOVERY_FILE_NAME" with the file name you would like restored to the local file system. IE: database-backup.sql
+
 ## Example in action
 
-View the [video](https://asciinema.org/a/qKERwE1jn2EBnhIzZKw88ENpZ) that showcases the script.
+View the [video](https://asciinema.org/a/nXFgEqLaY1S5RmkKwLWJcMRYz) that showcases the script.

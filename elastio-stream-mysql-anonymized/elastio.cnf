@@ -1,0 +1,12 @@
+secret = 'mysecret'
+stats = 'no'
+
+tables = {
+    `contacts` = {
+        `first` = texthash 9
+        `last` = texthash 9
+        `email` = emailhash 'example.com' 12
+        `ssn` = inthash 9
+        `dob` = fixed '1970-01-01'
+    }
+}

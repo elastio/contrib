@@ -4,8 +4,10 @@ import os
 import subprocess
 import ast
 import json
+import time
 
 from kafka import KafkaProducer
+
 
 logging.basicConfig(level=logging.CRITICAL)
 
@@ -28,11 +30,24 @@ args = parser.parse_args()
 
 if args.mod == "backup":
     print("Backup started.")
-    status = os.system(f"python consumer.py --topic_name {args.topic_name} --brokers {' '.join(args.brokers)} | elastio stream backup --stream-name {args.topic_name} --vault {args.vault}")
-    if status == 0:
-        print('Backup finished successfuly!')
-    else:
-        print('Status code: {}'.format(status))
+    res = os.popen(f"python consumer.py --topic_name {args.topic_name} --brokers {' '.join(args.brokers)} | elastio stream backup --stream-name {args.topic_name} --vault {args.vault} --output-format json").read()
+    rp_info = json.loads(res)
+    print(json.dumps(rp_info, indent=4))
+    print(f"Status: {rp_info['status']}")
+    if rp_info['status'] == 'Succeeded':
+        print(f"Recovery point ID: {rp_info['data']['rp_id']}")
+
+    with open('first_msg_info.json', 'r+') as first_msg_file:
+        data = json.load(first_msg_file)
+    first_msg_timestamp = data['timestamp']
+
+    with open('last_msg_info.json', 'r+') as last_msg_file:
+        data = json.load(last_msg_file)
+    last_msg_timestamp = data['timestamp']
+    os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag start_timestamp={first_msg_timestamp}")
+    time.sleep(1)
+    os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag end_timestamp={last_msg_timestamp}")
+
 
 elif args.mod == "restore":
     print("Restore started.")

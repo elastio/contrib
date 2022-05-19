@@ -1,8 +1,13 @@
-from kafka import KafkaConsumer
 import json
 import os
 import argparse
 import logging
+import subprocess
+
+from kafka import KafkaConsumer
+from common import id_generator, store_last_message, store_first_message
+
+
 logging.basicConfig(level=logging.CRITICAL)
 
 backup_parser = argparse.ArgumentParser(
@@ -13,11 +18,11 @@ backup_parser.add_argument("--brokers", type=str, nargs="+", help="Enter one or 
 args = backup_parser.parse_args()
 bootstrap_servers = args.brokers
 topic_name = args.topic_name
-
+_id = id_generator()
 
 consumer = KafkaConsumer(
     topic_name,
-    group_id='elastio-group',
+    group_id=f'{_id}-group',
     bootstrap_servers=bootstrap_servers,
     auto_offset_reset='earliest', # latest/earliest
     enable_auto_commit=True,
@@ -26,37 +31,40 @@ consumer = KafkaConsumer(
     api_version=(2,0,2)
     )
 
-if os.path.exists('last_msg_info.json'):
-    with open('last_msg_info.json', 'r+') as last_msg_file:
-        data = json.load(last_msg_file)
-    if data['topic'] == args.topic_name:
-        for msg in consumer:
-            if msg.timestamp > data['timestamp']:
-                # print(msg)
-                print({"topic": msg.topic, "key": msg.key, "value": msg.value.decode('utf-8'), "partition": msg.partition, "timestamp": msg.timestamp})
-    else:
-        for msg in consumer:
+res = subprocess.run(
+    ['elastio', 'rp', 'list', '--output-format', 'json'],
+    stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+rps = [json.loads(rp) for rp in res.stdout.splitlines()]
+for rp in rps[0]:
+    if rp['kind']['kind'] == 'Stream':
+        rp_name = rp['asset_snaps'][0]['asset_id'].split(':')[-1]
+        if rp_name == args.topic_name:
+            try:
+                end_timestamp = rp['tags']['end_timestamp']
+                topic_already_exists = True
+                break
+            except KeyError:
+                topic_already_exists = False
+                break
+
+fmsg = True
+if topic_already_exists:
+    for msg in consumer:
+        if msg.timestamp > int(end_timestamp):
             # print(msg)
+            if fmsg:
+                store_first_message(msg, fmsg=fmsg)
+                fmsg = False
             print({"topic": msg.topic, "key": msg.key, "value": msg.value.decode('utf-8'), "partition": msg.partition, "timestamp": msg.timestamp})
+    store_last_message(msg=msg)
 else:
     for msg in consumer:
         # print(msg)
+        if fmsg:
+            store_first_message(msg, fmsg=fmsg)
+            fmsg = False
         print({"topic": msg.topic, "key": msg.key, "value": msg.value.decode('utf-8'), "partition": msg.partition, "timestamp": msg.timestamp})
-try:
-    lmsg_topic = msg.topic
-    lmsg_key = msg.key
-    lmsg_timestamp = msg.timestamp
-    lmsg_offset = msg.offset
-    lmsg_value = msg.value.decode('utf-8')
-    consumer.close()
-    data = {
-        'topic': lmsg_topic,
-        'offset': lmsg_offset,
-        'timestamp': lmsg_timestamp,
-        'key': lmsg_key,
-        'value': lmsg_value
-        }
-    with open('last_msg_info.json', 'w+') as last_msg_file:
-        json.dump(data, last_msg_file, indent=4)
-except NameError:
-    print("You don't have new messges to backup.")
+    store_last_message(msg=msg)
+
+consumer.close()

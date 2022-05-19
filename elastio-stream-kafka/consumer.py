@@ -16,6 +16,8 @@ backup_parser = argparse.ArgumentParser(
 backup_parser.add_argument("--topic_name", type=str, nargs="?", help="Enter Kafka topic name to backup.")
 backup_parser.add_argument("--brokers", type=str, nargs="+", help="Enter one or more Kafka brokers separated by spaces.")
 args = backup_parser.parse_args()
+
+# parse brokers and topic name from the script arguments
 bootstrap_servers = args.brokers
 topic_name = args.topic_name
 _id = id_generator()
@@ -35,6 +37,7 @@ res = subprocess.run(
     ['elastio', 'rp', 'list', '--output-format', 'json'],
     stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
+topic_already_exists = False
 rps = [json.loads(rp) for rp in res.stdout.splitlines()]
 for rp in rps[0]:
     if rp['kind']['kind'] == 'Stream':
@@ -45,7 +48,6 @@ for rp in rps[0]:
                 topic_already_exists = True
                 break
             except KeyError:
-                topic_already_exists = False
                 break
 
 fmsg = True
@@ -56,7 +58,7 @@ if topic_already_exists:
             if fmsg:
                 store_first_message(msg, fmsg=fmsg)
                 fmsg = False
-            print({"topic": msg.topic, "key": msg.key, "value": msg.value.decode('utf-8'), "partition": msg.partition, "timestamp": msg.timestamp})
+            print({"topic": msg.topic, "key": msg.key, "value": msg.value, "partition": msg.partition, "timestamp": msg.timestamp})
     store_last_message(msg=msg)
 else:
     for msg in consumer:
@@ -64,7 +66,7 @@ else:
         if fmsg:
             store_first_message(msg, fmsg=fmsg)
             fmsg = False
-        print({"topic": msg.topic, "key": msg.key, "value": msg.value.decode('utf-8'), "partition": msg.partition, "timestamp": msg.timestamp})
+        print({"topic": msg.topic, "key": msg.key, "value": msg.value, "partition": msg.partition, "timestamp": msg.timestamp})
     store_last_message(msg=msg)
 
 consumer.close()

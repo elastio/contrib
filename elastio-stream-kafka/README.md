@@ -50,7 +50,7 @@
     Schema of arguments:
 
     ```
-    python elastio_stream_kafka.py backup --topic_name <Name-of-your-topic> --rp_id <Id-of-your-recovery-point> --brokers <broker1> <broker2> <broker3>
+    python elastio_stream_kafka.py restore --topic_name <Name-of-your-topic> --rp_id <Id-of-your-recovery-point> --brokers <broker1> <broker2> <broker3>
     ```
    
     Example:

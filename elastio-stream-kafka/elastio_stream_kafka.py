@@ -15,13 +15,16 @@ parser = argparse.ArgumentParser(
     prog="Elastio stream kafka",
 )
 subparser = parser.add_subparsers(dest="mod")
+# subparser accept two posible modes of work this script backup and restore
 
 backup_parser = subparser.add_parser("backup")
+# backup mode arguments
 backup_parser.add_argument("--topic_name", required=True, type=str, nargs="?", help="Enter Kafka topic name to backup.")
 backup_parser.add_argument("--brokers", required=True, type=str, nargs="+", help="Enter one or more Kafka brokers separated by spaces.")
 backup_parser.add_argument("--vault", required=True, type=str, nargs="?", help="Enter vault name.")
 
 restore_parser = subparser.add_parser("restore")
+# restore mode arguments
 restore_parser.add_argument("--rp_id", required=True, type=str, nargs="?", help="Enter recovery point ID.")
 restore_parser.add_argument("--topic_name", required=True, type=str, nargs="?", help="Enter Kafka topic name to restore data for this topic.")
 restore_parser.add_argument("--brokers", required=True, type=str, nargs="+", help="Enter one or more Kafka brokers separated by spaces.")
@@ -47,22 +50,27 @@ if args.mod == "backup":
     os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag start_timestamp={first_msg_timestamp}")
     time.sleep(1)
     os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag end_timestamp={last_msg_timestamp}")
-
+    time.sleep(1)
+    os.remove('first_msg_info.json')
+    os.remove('last_msg_info.json')
 
 elif args.mod == "restore":
     print("Restore started.")
     bootstrap_servers = args.brokers
     prod = KafkaProducer(bootstrap_servers=bootstrap_servers)
-    res = subprocess.run(["elastio", "stream", "restore", "--rp", args.rp_id], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    res = subprocess.run(
+        ["elastio", "stream", "restore", "--rp", args.rp_id],
+        stdout=subprocess.PIPE)
     msg_count = 0
     for line in res.stdout.splitlines():
-        msg = ast.literal_eval(line.decode('utf-8'))
+        msg = ast.literal_eval(line.decode())
         msg_stat = prod.send(
             topic=args.topic_name,
             key=msg['key'],
-            value=json.dumps(ast.literal_eval(msg['value'])).encode('utf-8'),
+            value=msg['value'],
             partition=msg['partition'],
             timestamp_ms=msg['timestamp']
         )
         msg_count+=1
+    prod.close()
     print("Restore finished successfuly!\nRestored messeges count: {msg_count}".format(msg_count=msg_count))

@@ -1,33 +1,23 @@
 import string
 import random
 import json
-import sys
+import os
 
 
 def id_generator(size=6, chars=string.ascii_lowercase + string.digits):
     return ''.join(random.choice(chars) for _ in range(size))
 
 
-def store_last_message(msg):
-    try:
-        lmsg_timestamp = msg.timestamp
-        data = {
-            'timestamp': lmsg_timestamp
-            }
-        with open('last_msg_info.json', 'w+') as last_msg_file:
-            json.dump(data, last_msg_file, indent=4)
-    except NameError:
-        print("You don't have new messges to backup.", file=sys.stderr)
+def write_topic_info(data):
+    with open('topic_info.json', 'w+') as topic_info_file:
+        json.dump(data, topic_info_file, indent=4)
 
 
-def store_first_message(msg, fmsg=True):
-    if fmsg:
-        try:
-            fmsg_timestamp = msg.timestamp
-            data = {
-                'timestamp': fmsg_timestamp
-                }
-            with open('first_msg_info.json', 'w+') as last_msg_file:
-                json.dump(data, last_msg_file, indent=4)
-        except NameError:
-            print("You don't have new messges to backup.", file=sys.stderr)
+def read_topic_info():
+    with open('topic_info.json', 'r+') as topic_info_file:
+        data = json.load(topic_info_file)
+    return data
+
+
+def delete_topic_info():
+    os.remove('topic_info.json')

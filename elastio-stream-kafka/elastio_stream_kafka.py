@@ -7,6 +7,7 @@ import json
 import time
 
 from kafka import KafkaProducer
+from common import read_topic_info, delete_topic_info
 
 
 logging.basicConfig(level=logging.CRITICAL)
@@ -22,6 +23,7 @@ backup_parser = subparser.add_parser("backup")
 backup_parser.add_argument("--topic_name", required=True, type=str, nargs="?", help="Enter Kafka topic name to backup.")
 backup_parser.add_argument("--brokers", required=True, type=str, nargs="+", help="Enter one or more Kafka brokers separated by spaces.")
 backup_parser.add_argument("--vault", required=True, type=str, nargs="?", help="Enter vault name.")
+backup_parser.add_argument("--stream_name", required=True, type=str, nargs="?", help="Enter name of the stream.")
 
 restore_parser = subparser.add_parser("restore")
 # restore mode arguments
@@ -33,26 +35,25 @@ args = parser.parse_args()
 
 if args.mod == "backup":
     print("Backup started.")
-    res = os.popen(f"python consumer.py --topic_name {args.topic_name} --brokers {' '.join(args.brokers)} | elastio stream backup --stream-name {args.topic_name} --vault {args.vault} --output-format json").read()
+    res = os.popen(f"python consumer.py --topic_name {args.topic_name} --brokers {' '.join(args.brokers)} --stream_name {args.stream_name} | elastio stream backup --stream-name {args.stream_name} --vault {args.vault} --output-format json").read()
     rp_info = json.loads(res)
     print(json.dumps(rp_info, indent=4))
     print(f"Status: {rp_info['status']}")
     if rp_info['status'] == 'Succeeded':
         print(f"Recovery point ID: {rp_info['data']['rp_id']}")
-
-    with open('first_msg_info.json', 'r+') as first_msg_file:
-        data = json.load(first_msg_file)
-    first_msg_timestamp = data['timestamp']
-
-    with open('last_msg_info.json', 'r+') as last_msg_file:
-        data = json.load(last_msg_file)
-    last_msg_timestamp = data['timestamp']
-    os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag start_timestamp={first_msg_timestamp}")
+    topic_info_data = read_topic_info()
+    os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag topic_name={topic_info_data['topic_name']}")
     time.sleep(1)
-    os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag end_timestamp={last_msg_timestamp}")
+    os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_count={topic_info_data['partition_count']}")
     time.sleep(1)
-    os.remove('first_msg_info.json')
-    os.remove('last_msg_info.json')
+    for partition in range(topic_info_data['partition_count']):
+        first_key = 'partition_' + str(partition) + '_first_msg_offset'
+        second_key = 'partition_' + str(partition) + '_last_msg_offset'
+        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_first_msg_offset={topic_info_data[first_key]}")
+        time.sleep(1)
+        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_last_msg_offset={topic_info_data[second_key]}")
+        time.sleep(1)
+    delete_topic_info()
 
 elif args.mod == "restore":
     print("Restore started.")
@@ -69,7 +70,8 @@ elif args.mod == "restore":
             key=msg['key'],
             value=msg['value'],
             partition=msg['partition'],
-            timestamp_ms=msg['timestamp']
+            timestamp_ms=msg['timestamp'],
+            headers=msg['headers']
         )
         msg_count+=1
     prod.close()

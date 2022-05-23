@@ -28,12 +28,12 @@
 
 ## Backup:
 1. Open **elastio-stream-kafka** directory in your terminal. <!--Discuss another naming-->
-2. To backup Kafka message you need to run `elastio_stream_kafka.py` script with the following arguments: **topic_name**, **brokers**, **vault**.<br/>
+2. To backup Kafka message you need to run `elastio_stream_kafka.py` script with the following arguments: **topic_name**, **brokers**, **vault**, **stream_name**.<br/>
     
     Schema of arguments:
     
     ```
-    python elastio_stream_kafka.py backup --topic_name <Name-of-your-topic> --vault <Name-of-your-vault> --brokers <broker1> <broker2> <broker3>
+    python elastio_stream_kafka.py backup --topic_name <Name-of-your-topic> --vault <Name-of-your-vault> --brokers <broker1> <broker2> <broker3> --stream_name <name-of-your-stream>
     ```
     
     Example:

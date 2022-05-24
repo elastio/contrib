@@ -23,7 +23,6 @@ backup_parser = subparser.add_parser("backup")
 backup_parser.add_argument("--topic_name", required=True, type=str, nargs="?", help="Enter Kafka topic name to backup.")
 backup_parser.add_argument("--brokers", required=True, type=str, nargs="+", help="Enter one or more Kafka brokers separated by spaces.")
 backup_parser.add_argument("--vault", required=True, type=str, nargs="?", help="Enter vault name.")
-backup_parser.add_argument("--stream_name", required=True, type=str, nargs="?", help="Enter name of the stream.")
 
 restore_parser = subparser.add_parser("restore")
 # restore mode arguments
@@ -35,7 +34,11 @@ args = parser.parse_args()
 
 if args.mod == "backup":
     print("Backup started.")
-    res = os.popen(f"python consumer.py --topic_name {args.topic_name} --brokers {' '.join(args.brokers)} --stream_name {args.stream_name} | elastio stream backup --stream-name {args.stream_name} --vault {args.vault} --output-format json").read()
+    override_hostname = "{cluster_name}:{topic_name}".format(
+        cluster_name=str(args.brokers[0].split('.')[1]),
+        topic_name=args.topic_name
+        )
+    res = os.popen(f"python consumer.py --topic_name {args.topic_name} --brokers {' '.join(args.brokers)} | elastio stream backup --stream-name {args.topic_name} --vault {args.vault} --output-format json --hostname-override {override_hostname}").read()
     rp_info = json.loads(res)
     print(json.dumps(rp_info, indent=4))
     print(f"Status: {rp_info['status']}")
@@ -47,12 +50,19 @@ if args.mod == "backup":
     os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_count={topic_info_data['partition_count']}")
     time.sleep(1)
     for partition in range(topic_info_data['partition_count']):
-        first_key = 'partition_' + str(partition) + '_first_msg_offset'
-        second_key = 'partition_' + str(partition) + '_last_msg_offset'
-        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_first_msg_offset={topic_info_data[first_key]}")
-        time.sleep(1)
-        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_last_msg_offset={topic_info_data[second_key]}")
-        time.sleep(1)
+        first_message_offset_key = 'partition_' + str(partition) + '_first_msg_offset'
+        last_message_offset_key = 'partition_' + str(partition) + '_last_msg_offset'
+        first_message_timestamp_key = 'partition_' + str(partition) + '_first_msg_timestamp'
+        last_message_timestamp_key = 'partition_' + str(partition) + '_last_msg_timestamp'
+        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_first_msg_offset={topic_info_data[first_message_offset_key]}")
+        time.sleep(0.5)
+        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_last_msg_offset={topic_info_data[last_message_offset_key]}")
+        time.sleep(0.5)
+        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_first_msg_timestamp={topic_info_data[first_message_timestamp_key]}")
+        time.sleep(0.5)
+        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_last_msg_timestamp={topic_info_data[last_message_timestamp_key]}")
+        time.sleep(0.5)
+
     delete_topic_info()
 
 elif args.mod == "restore":

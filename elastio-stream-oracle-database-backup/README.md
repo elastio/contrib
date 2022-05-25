@@ -61,4 +61,4 @@ bash backup-oracle-table.sh database_name s3_bucket_name table_name
 
 ## Script in action
 
-[Watch the script run in action](https://asciinema.org/connect/9903b254-91a1-4377-be15-376d199cbda4)
+[Watch the script run in action](https://asciinema.org/a/KUbY9qoMtKPudH4pLRcTHopAy)

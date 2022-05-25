@@ -1,13 +1,12 @@
+import json
+import os
 import argparse
 import logging
-import os
 import subprocess
 import ast
-import json
-import time
 
-from kafka import KafkaProducer
-from common import read_topic_info, delete_topic_info
+from kafka import KafkaConsumer, TopicPartition, KafkaProducer
+from common import id_generator, new_message_exists
 
 
 logging.basicConfig(level=logging.CRITICAL)
@@ -33,55 +32,155 @@ restore_parser.add_argument("--brokers", required=True, type=str, nargs="+", hel
 args = parser.parse_args()
 
 if args.mod == "backup":
-    print("Backup started.")
-    override_hostname = "{cluster_name}:{topic_name}".format(
-        cluster_name=str(args.brokers[0].split('.')[1]),
-        topic_name=args.topic_name
-        )
-    res = os.popen(f"python consumer.py --topic_name {args.topic_name} --brokers {' '.join(args.brokers)} | elastio stream backup --stream-name {args.topic_name} --vault {args.vault} --output-format json --hostname-override {override_hostname}").read()
-    rp_info = json.loads(res)
-    print(json.dumps(rp_info, indent=4))
-    print(f"Status: {rp_info['status']}")
-    if rp_info['status'] == 'Succeeded':
-        print(f"Recovery point ID: {rp_info['data']['rp_id']}")
-    topic_info_data = read_topic_info()
-    os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag topic_name={topic_info_data['topic_name']}")
-    time.sleep(1)
-    os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_count={topic_info_data['partition_count']}")
-    time.sleep(1)
-    for partition in range(topic_info_data['partition_count']):
-        first_message_offset_key = 'partition_' + str(partition) + '_first_msg_offset'
-        last_message_offset_key = 'partition_' + str(partition) + '_last_msg_offset'
-        first_message_timestamp_key = 'partition_' + str(partition) + '_first_msg_timestamp'
-        last_message_timestamp_key = 'partition_' + str(partition) + '_last_msg_timestamp'
-        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_first_msg_offset={topic_info_data[first_message_offset_key]}")
-        time.sleep(0.5)
-        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_last_msg_offset={topic_info_data[last_message_offset_key]}")
-        time.sleep(0.5)
-        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_first_msg_timestamp={topic_info_data[first_message_timestamp_key]}")
-        time.sleep(0.5)
-        os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag partition_{str(partition)}_last_msg_timestamp={topic_info_data[last_message_timestamp_key]}")
-        time.sleep(0.5)
+    # parse brokers and topic name from the script arguments
+    bootstrap_servers = args.brokers
+    topic_name = args.topic_name
+    _id = id_generator()
+    topic_info_data = {}
+    topic_info_data['topic_name'] = args.topic_name
 
-    delete_topic_info()
+    consumer = KafkaConsumer(
+        group_id=f'{_id}-group',
+        bootstrap_servers=bootstrap_servers,
+        auto_offset_reset='earliest', # latest/earliest
+        enable_auto_commit=True,
+        auto_commit_interval_ms=1000, # 1s 
+        consumer_timeout_ms=10000, # 10s
+        api_version=(0, 10, 1)
+        )
+
+    topic_previously_backed_up = False
+    res = subprocess.run(
+        ['elastio', 'rp', 'list', '--output-format', 'json', '--type', 'stream'],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+    rps = [json.loads(rp) for rp in res.stdout.splitlines()]
+    for rp in rps[0]:
+        if rp['kind']['kind'] == 'Stream':
+            rp_name = rp['asset_snaps'][0]['asset_id'].split(':')[-1]
+            try:
+                if rp_name == args.topic_name and rp['tags']['topic_name'] == args.topic_name:
+                    topic_previously_backed_up = True
+                    break
+            except KeyError:
+                continue
+
+    print(f"Topic previously backed up: {topic_previously_backed_up}")
+
+    partitions = consumer.partitions_for_topic(topic_name)
+    partition_count = len(partitions)
+    topic_info_data['partition_count'] = partition_count
+    new_message_info = {}
+    for partition in partitions:
+        if topic_previously_backed_up:
+            _key = f'partition_{str(partition)}_last_msg_offset'
+            new_message_info[partition] = new_message_exists(topic_name, bootstrap_servers, topic_previously_backed_up, partition, int(rp['tags'][_key]))
+        else:
+            new_message_info[partition] = new_message_exists(topic_name, bootstrap_servers, topic_previously_backed_up, partition, 0)
+
+    if True in new_message_info.values():
+        print(f"Elastio starting backup {args.topic} topic.")
+        override_hostname = "{cluster_name}:{topic_name}".format(
+                cluster_name=str(args.brokers[0].split('.')[1]),
+                topic_name=args.topic_name
+                )
+        proc = subprocess.Popen(
+            ['elastio', 'stream', 'backup', '--stream-name', topic_name, '--output-format', 'json', '--hostname-override', override_hostname, '--vault', args.vault],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+        if topic_previously_backed_up:
+            for partition_key in new_message_info.keys():
+                first_message = True
+                if new_message_info[partition_key]:
+                    consumer.assign([TopicPartition(topic_name, partition_key), ])
+                    for msg in consumer:
+                        _key = f'partition_{str(partition_key)}_last_msg_offset'
+                        if msg.offset > int(rp['tags'][_key]):
+                            if first_message:
+                                topic_info_data[f'partition_{str(partition_key)}_first_msg_offset'] = msg.offset
+                                topic_info_data[f'partition_{str(partition_key)}_first_msg_timestamp'] = msg.timestamp
+                                first_message = False
+                            # print({"topic": msg.topic, "key": msg.key, "value": msg.value, "partition": msg.partition, "timestamp": msg.timestamp, "offset": msg.offset, "headers":msg.headers})
+                            msg_line = json.dumps({
+                                "topic": msg.topic,
+                                "key": msg.key.decode(),
+                                "value": msg.value.decode(),
+                                "partition": msg.partition,
+                                "timestamp": msg.timestamp,
+                                "offset": msg.offset
+                                }).encode()
+                            proc.stdin.write(msg_line)
+                            proc.stdin.write(b'\n')
+                            topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = msg.offset
+                            topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = msg.timestamp
+                else:
+                    _key = f'partition_{str(partition_key)}_last_msg_offset'
+                    topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = int(rp['tags'][_key])
+                    topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = 0
+        else:
+            for partition_key in new_message_info.keys():
+                first_message = True
+                if new_message_info[partition_key]:
+                    consumer.assign([TopicPartition(topic_name, partition_key), ])
+                    for msg in consumer:
+                        if first_message:
+                            topic_info_data[f'partition_{str(partition_key)}_first_msg_offset'] = msg.offset
+                            topic_info_data[f'partition_{str(partition_key)}_first_msg_timestamp'] = msg.timestamp
+                            first_message = False
+                        # print({"topic": msg.topic, "key": msg.key, "value": msg.value, "partition": msg.partition, "timestamp": msg.timestamp, "offset": msg.offset, "headers":msg.headers})
+                        msg_line = json.dumps({
+                            "topic": msg.topic,
+                            "key": msg.key.decode(),
+                            "value": msg.value.decode(),
+                            "partition": msg.partition,
+                            "timestamp": msg.timestamp,
+                            "offset": msg.offset
+                            }).encode()
+                        proc.stdin.write(msg_line)
+                        proc.stdin.write(b'\n')
+                        topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = msg.offset
+                        topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = msg.timestamp
+
+                else:
+                    if topic_previously_backed_up:
+                        _key = f'partition_{str(partition_key)}_last_msg_offset'
+                        topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = int(rp['tags'][_key])
+                        topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = 0
+                    else:
+                        topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = 0
+                        topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = 0
+
+        proc.stdin.close()
+        proc.wait()
+        result = proc.stdout.read().decode()
+        rp_info = json.loads(result)
+        print(json.dumps(rp_info, indent=4))
+        print(f"Status: {rp_info['status']}")
+        if rp_info['status'] == 'Succeeded':
+            print(f"Recovery point ID: {rp_info['data']['rp_id']}")
+            for _key, _value in topic_info_data.items():
+                os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag {_key}={_value}")
+
+    else:
+        print("You don't have new message to backup")
+    consumer.close()
 
 elif args.mod == "restore":
-    print("Restore started.")
+    print(f"Elastio starting restore.\nRecovery point ID: {args.rp_id}")
     bootstrap_servers = args.brokers
-    prod = KafkaProducer(bootstrap_servers=bootstrap_servers)
+    prod = KafkaProducer(bootstrap_servers=bootstrap_servers, api_version=(0, 10, 1))
     res = subprocess.run(
         ["elastio", "stream", "restore", "--rp", args.rp_id],
         stdout=subprocess.PIPE)
     msg_count = 0
-    for line in res.stdout.splitlines():
-        msg = ast.literal_eval(line.decode())
+    messages = [json.loads(line.decode()) for line in res.stdout.splitlines()]
+    for msg in messages:
         msg_stat = prod.send(
             topic=args.topic_name,
-            key=msg['key'],
-            value=msg['value'],
+            key=msg['key'].encode(),
+            value=msg['value'].encode(),
             partition=msg['partition'],
-            timestamp_ms=msg['timestamp'],
-            headers=msg['headers']
+            timestamp_ms=msg['timestamp']
         )
         msg_count+=1
     prod.close()

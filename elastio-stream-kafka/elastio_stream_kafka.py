@@ -167,7 +167,7 @@ elif args.mod == "restore":
         ["elastio", "stream", "restore", "--rp", args.rp_id],
         stdout=subprocess.PIPE)
     msg_count = 0
-    datas = [json.loads(line.decode()) for line in res.stdout.splitlines()]
+    datas = (json.loads(line.decode()) for line in res.stdout.splitlines())
     for data in datas:
         msg_stat = prod.send(
             topic=data['topic'],

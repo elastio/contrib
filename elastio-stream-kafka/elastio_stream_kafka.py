@@ -4,6 +4,8 @@ import argparse
 import logging
 import subprocess
 import ast
+import base64
+import time
 
 from kafka import KafkaConsumer, TopicPartition, KafkaProducer
 from common import id_generator, new_message_exists
@@ -47,7 +49,7 @@ if args.mod == "backup":
         auto_commit_interval_ms=1000, # 1s 
         consumer_timeout_ms=10000, # 10s
         api_version=(0, 10, 1)
-        )
+    )
 
     topic_previously_backed_up = False
     res = subprocess.run(
@@ -74,12 +76,12 @@ if args.mod == "backup":
     for partition in partitions:
         if topic_previously_backed_up:
             _key = f'partition_{str(partition)}_last_msg_offset'
-            new_message_info[partition] = new_message_exists(topic_name, bootstrap_servers, topic_previously_backed_up, partition, int(rp['tags'][_key]))
+            new_message_info[partition] = new_message_exists(topic_name, bootstrap_servers, partition, int(rp['tags'][_key])+1)
         else:
-            new_message_info[partition] = new_message_exists(topic_name, bootstrap_servers, topic_previously_backed_up, partition, 0)
+            new_message_info[partition] = new_message_exists(topic_name, bootstrap_servers, partition, 0)
 
     if True in new_message_info.values():
-        print(f"Elastio starting backup {args.topic} topic.")
+        print(f"Elastio starting backup {args.topic_name} topic.")
         override_hostname = "{cluster_name}:{topic_name}".format(
                 cluster_name=str(args.brokers[0].split('.')[1]),
                 topic_name=args.topic_name
@@ -100,17 +102,10 @@ if args.mod == "backup":
                                 topic_info_data[f'partition_{str(partition_key)}_first_msg_offset'] = msg.offset
                                 topic_info_data[f'partition_{str(partition_key)}_first_msg_timestamp'] = msg.timestamp
                                 first_message = False
-                            # print({"topic": msg.topic, "key": msg.key, "value": msg.value, "partition": msg.partition, "timestamp": msg.timestamp, "offset": msg.offset, "headers":msg.headers})
-                            msg_line = json.dumps({
-                                "topic": msg.topic,
-                                "key": msg.key.decode(),
-                                "value": msg.value.decode(),
-                                "partition": msg.partition,
-                                "timestamp": msg.timestamp,
-                                "offset": msg.offset
-                                }).encode()
-                            proc.stdin.write(msg_line)
-                            proc.stdin.write(b'\n')
+                            separator = b'\n'
+                            proc.stdin.write(
+                                b', '.join([msg.topic.encode(), base64.b64encode(msg.key), base64.b64encode(msg.value), str(msg.partition).encode(), str(msg.timestamp).encode(), str(msg.offset).encode(), separator])
+                            )
                             topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = msg.offset
                             topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = msg.timestamp
                 else:
@@ -127,28 +122,15 @@ if args.mod == "backup":
                             topic_info_data[f'partition_{str(partition_key)}_first_msg_offset'] = msg.offset
                             topic_info_data[f'partition_{str(partition_key)}_first_msg_timestamp'] = msg.timestamp
                             first_message = False
-                        # print({"topic": msg.topic, "key": msg.key, "value": msg.value, "partition": msg.partition, "timestamp": msg.timestamp, "offset": msg.offset, "headers":msg.headers})
-                        msg_line = json.dumps({
-                            "topic": msg.topic,
-                            "key": msg.key.decode(),
-                            "value": msg.value.decode(),
-                            "partition": msg.partition,
-                            "timestamp": msg.timestamp,
-                            "offset": msg.offset
-                            }).encode()
-                        proc.stdin.write(msg_line)
-                        proc.stdin.write(b'\n')
+                        separator = b'\n'
+                        proc.stdin.write(
+                            b', '.join([msg.topic.encode(), base64.b64encode(msg.key), base64.b64encode(msg.value), str(msg.partition).encode(), str(msg.timestamp).encode(), str(msg.offset).encode(), separator])
+                        )
                         topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = msg.offset
                         topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = msg.timestamp
-
                 else:
-                    if topic_previously_backed_up:
-                        _key = f'partition_{str(partition_key)}_last_msg_offset'
-                        topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = int(rp['tags'][_key])
-                        topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = 0
-                    else:
-                        topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = 0
-                        topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = 0
+                    topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = 0
+                    topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = 0
 
         proc.stdin.close()
         proc.wait()
@@ -173,14 +155,16 @@ elif args.mod == "restore":
         ["elastio", "stream", "restore", "--rp", args.rp_id],
         stdout=subprocess.PIPE)
     msg_count = 0
-    messages = [json.loads(line.decode()) for line in res.stdout.splitlines()]
-    for msg in messages:
+    counter = 0
+    data = []
+    for line in res.stdout.splitlines():
+        data = line.split(b', ')
         msg_stat = prod.send(
-            topic=args.topic_name,
-            key=msg['key'].encode(),
-            value=msg['value'].encode(),
-            partition=msg['partition'],
-            timestamp_ms=msg['timestamp']
+            topic=data[0].decode(),
+            key=base64.b64decode(data[1]),
+            value=base64.b64decode(data[2]),
+            partition=int(data[3].decode()),
+            timestamp_ms=int(data[4].decode())
         )
         msg_count+=1
     prod.close()

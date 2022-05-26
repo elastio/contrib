@@ -5,7 +5,7 @@ import logging
 import subprocess
 import ast
 import base64
-import time
+import json
 
 from kafka import KafkaConsumer, TopicPartition, KafkaProducer
 from common import id_generator, new_message_exists
@@ -102,10 +102,16 @@ if args.mod == "backup":
                                 topic_info_data[f'partition_{str(partition_key)}_first_msg_offset'] = msg.offset
                                 topic_info_data[f'partition_{str(partition_key)}_first_msg_timestamp'] = msg.timestamp
                                 first_message = False
-                            separator = b'\n'
-                            proc.stdin.write(
-                                b', '.join([msg.topic.encode(), base64.b64encode(msg.key), base64.b64encode(msg.value), str(msg.partition).encode(), str(msg.timestamp).encode(), str(msg.offset).encode(), separator])
-                            )
+                            data = json.dumps({
+                                "topic": msg.topic,
+                                "key": base64.b64encode(msg.key).decode(),
+                                "value": base64.b64encode(msg.value).decode(),
+                                "partition": msg.partition,
+                                "timestamp": msg.timestamp,
+                                "offset": msg.offset
+                            }).encode()
+                            proc.stdin.write(data)
+                            proc.stdin.write(b'\n')
                             topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = msg.offset
                             topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = msg.timestamp
                 else:
@@ -122,10 +128,16 @@ if args.mod == "backup":
                             topic_info_data[f'partition_{str(partition_key)}_first_msg_offset'] = msg.offset
                             topic_info_data[f'partition_{str(partition_key)}_first_msg_timestamp'] = msg.timestamp
                             first_message = False
-                        separator = b'\n'
-                        proc.stdin.write(
-                            b', '.join([msg.topic.encode(), base64.b64encode(msg.key), base64.b64encode(msg.value), str(msg.partition).encode(), str(msg.timestamp).encode(), str(msg.offset).encode(), separator])
-                        )
+                        data = json.dumps({
+                            "topic": msg.topic,
+                            "key": base64.b64encode(msg.key).decode(),
+                            "value": base64.b64encode(msg.value).decode(),
+                            "partition": msg.partition,
+                            "timestamp": msg.timestamp,
+                            "offset": msg.offset
+                        }).encode()
+                        proc.stdin.write(data)
+                        proc.stdin.write(b'\n')
                         topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = msg.offset
                         topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = msg.timestamp
                 else:
@@ -155,16 +167,14 @@ elif args.mod == "restore":
         ["elastio", "stream", "restore", "--rp", args.rp_id],
         stdout=subprocess.PIPE)
     msg_count = 0
-    counter = 0
-    data = []
-    for line in res.stdout.splitlines():
-        data = line.split(b', ')
+    datas = [json.loads(line.decode()) for line in res.stdout.splitlines()]
+    for data in datas:
         msg_stat = prod.send(
-            topic=data[0].decode(),
-            key=base64.b64decode(data[1]),
-            value=base64.b64decode(data[2]),
-            partition=int(data[3].decode()),
-            timestamp_ms=int(data[4].decode())
+            topic=data['topic'],
+            key=base64.b64decode(data['key']),
+            value=base64.b64decode(data['value']),
+            partition=data['partition'],
+            timestamp_ms=data['timestamp']
         )
         msg_count+=1
     prod.close()

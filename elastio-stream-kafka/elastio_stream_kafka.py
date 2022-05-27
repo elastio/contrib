@@ -31,16 +31,17 @@ restore_parser.add_argument("--rp_id", required=True, type=str, nargs="?", help=
 restore_parser.add_argument("--topic_name", required=True, type=str, nargs="?", help="Enter Kafka topic name to restore data for this topic.")
 restore_parser.add_argument("--brokers", required=True, type=str, nargs="+", help="Enter one or more Kafka brokers separated by spaces.")
 
+# parse brokers, topic_name, valult, rp_id from the script arguments.
 args = parser.parse_args()
 
 if args.mod == "backup":
-    # parse brokers and topic name from the script arguments
     bootstrap_servers = args.brokers
     topic_name = args.topic_name
     _id = id_generator()
     topic_info_data = {}
     topic_info_data['topic_name'] = args.topic_name
 
+    # Creating Kafka consummer with random group.
     consumer = KafkaConsumer(
         group_id=f'{_id}-group',
         bootstrap_servers=bootstrap_servers,
@@ -51,6 +52,13 @@ if args.mod == "backup":
         api_version=(0, 10, 1)
     )
 
+    """
+    Call Elastio CLI to get stream recovery points list.
+    Checking if the topic was already backup.
+    If the topic previously backed up set variable topic_previously_backed_up = True
+    and geting offset last message what be stored in last time.
+    Last message offset stored in recovery point tags with name "partition_<PARTITION_NUMBER>_last_msg_offset".
+    """
     topic_previously_backed_up = False
     res = subprocess.run(
         ['elastio', 'rp', 'list', '--output-format', 'json', '--type', 'stream'],
@@ -66,13 +74,15 @@ if args.mod == "backup":
                     break
             except KeyError:
                 continue
-
     print(f"Topic previously backed up: {topic_previously_backed_up}")
 
+    # Get topic partition count.
     partitions = consumer.partitions_for_topic(topic_name)
     partition_count = len(partitions)
     topic_info_data['partition_count'] = partition_count
     new_message_info = {}
+
+    # Checking each topic partition for news message.
     for partition in partitions:
         if topic_previously_backed_up:
             _key = f'partition_{str(partition)}_last_msg_offset'
@@ -80,28 +90,40 @@ if args.mod == "backup":
         else:
             new_message_info[partition] = new_message_exists(topic_name, bootstrap_servers, partition, 0)
 
+    """
+    Checking information about new posts for a topic.
+    If there is a new message in one of the partitions, messages backup will start.
+    """
     if True in new_message_info.values():
         print(f"Elastio starting backup {args.topic_name} topic.")
         override_hostname = "{cluster_name}:{topic_name}".format(
                 cluster_name=str(args.brokers[0].split('.')[1]),
                 topic_name=args.topic_name
                 )
+        # Running elastio stream backup command in a parallel process to isolate it.
         proc = subprocess.Popen(
             ['elastio', 'stream', 'backup', '--stream-name', topic_name, '--output-format', 'json', '--hostname-override', override_hostname, '--vault', args.vault],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
         )
         if topic_previously_backed_up:
+            # If topic previously backed consumer get messages what offset greater then offset from the previous backup.
             for partition_key in new_message_info.keys():
+                # Get partition number.
                 first_message = True
+                # Check for new message in partition.
                 if new_message_info[partition_key]:
+                    # If True assign partition to topic.
                     consumer.assign([TopicPartition(topic_name, partition_key), ])
+                    # Read and processing Kafka messages.
                     for msg in consumer:
                         _key = f'partition_{str(partition_key)}_last_msg_offset'
                         if msg.offset > int(rp['tags'][_key]):
                             if first_message:
+                                # Store information about first message.
                                 topic_info_data[f'partition_{str(partition_key)}_first_msg_offset'] = msg.offset
                                 topic_info_data[f'partition_{str(partition_key)}_first_msg_timestamp'] = msg.timestamp
                                 first_message = False
+                            # Dumps Kafka messages to json format.
                             data = json.dumps({
                                 "topic": msg.topic,
                                 "key": base64.b64encode(msg.key).decode(),
@@ -110,18 +132,25 @@ if args.mod == "backup":
                                 "timestamp": msg.timestamp,
                                 "offset": msg.offset
                             }).encode()
+                            # Write data to stdin in elastio stream backup process.
                             proc.stdin.write(data)
                             proc.stdin.write(b'\n')
+                            # Store information about last message.
                             topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = msg.offset
                             topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = msg.timestamp
                 else:
+                    # Else get tags from the previously backup .
                     _key = f'partition_{str(partition_key)}_last_msg_offset'
                     topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = int(rp['tags'][_key])
                     topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = 0
         else:
+            # Else offset = 0
             for partition_key in new_message_info.keys():
+                # Get partition number
                 first_message = True
+                # Check for new message in partition.
                 if new_message_info[partition_key]:
+                    # If True assign partition to topic.
                     consumer.assign([TopicPartition(topic_name, partition_key), ])
                     for msg in consumer:
                         if first_message:
@@ -141,11 +170,16 @@ if args.mod == "backup":
                         topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = msg.offset
                         topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = msg.timestamp
                 else:
+                    # Else set 0 tag for timestamp and offset, because topic partition is empty.
                     topic_info_data[f'partition_{str(partition_key)}_last_msg_offset'] = 0
                     topic_info_data[f'partition_{str(partition_key)}_last_msg_timestamp'] = 0
 
+        # Close elastio stream backup process.
         proc.stdin.close()
+        # Wait where data was processed.
         proc.wait()
+        # Read elastio stream backup process output.
+        # Show recovery point information.
         result = proc.stdout.read().decode()
         rp_info = json.loads(result)
         print(json.dumps(rp_info, indent=4))
@@ -167,8 +201,11 @@ elif args.mod == "restore":
         ["elastio", "stream", "restore", "--rp", args.rp_id],
         stdout=subprocess.PIPE)
     msg_count = 0
+    # Read data from elastio stream restore process.
+    # Load to json format.
     datas = (json.loads(line.decode()) for line in res.stdout.splitlines())
     for data in datas:
+        # Write data to the Kafka topic.
         msg_stat = prod.send(
             topic=data['topic'],
             key=base64.b64decode(data['key']),

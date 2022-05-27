@@ -36,7 +36,6 @@ def new_message_exists(topic: str, bootstrap_servers: list, partition: int, offs
     print(f"Checking for new message - Topic: {topic} | Partition {partition}")
     for msg in consumer:
         if msg.offset >= offset:
-            print(f"msg-offset: {msg.offset} | offset: {offset}")
             new_message_count+=1
             if new_message_count >= minimal_new_message_count_to_backup:
                 consumer.close()

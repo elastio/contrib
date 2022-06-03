@@ -66,7 +66,7 @@ if args.mod == "backup":
         )
     rps = [json.loads(rp) for rp in res.stdout.splitlines()]
     for rp in rps[0]:
-        if rp['kind']['kind'] == 'Stream':
+        if rp['kind'] == 'Stream':
             rp_name = rp['asset_snaps'][0]['asset_id'].split(':')[-1]
             try:
                 if rp_name == args.topic_name and rp['tags']['topic_name'] == args.topic_name:

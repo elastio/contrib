@@ -126,8 +126,8 @@ if args.mod == "backup":
                             # Dumps Kafka messages to json format.
                             data = json.dumps({
                                 "topic": msg.topic,
-                                "key": base64.b64encode(msg.key).decode(),
-                                "value": base64.b64encode(msg.value).decode(),
+                                "key": base64.b64encode(msg.key).decode() if msg.key is not None else None,
+                                "value": base64.b64encode(msg.value).decode() if msg.value is not None else None,
                                 "partition": msg.partition,
                                 "timestamp": msg.timestamp,
                                 "offset": msg.offset
@@ -159,8 +159,8 @@ if args.mod == "backup":
                             first_message = False
                         data = json.dumps({
                             "topic": msg.topic,
-                            "key": base64.b64encode(msg.key).decode(),
-                            "value": base64.b64encode(msg.value).decode(),
+                            "key": base64.b64encode(msg.key).decode() if msg.key is not None else None,
+                            "value": base64.b64encode(msg.value).decode() if msg.value is not None else None,
                             "partition": msg.partition,
                             "timestamp": msg.timestamp,
                             "offset": msg.offset
@@ -207,9 +207,9 @@ elif args.mod == "restore":
     for data in datas:
         # Write data to the Kafka topic.
         msg_stat = prod.send(
-            topic=data['topic'],
-            key=base64.b64decode(data['key']),
-            value=base64.b64decode(data['value']),
+            topic=args.topic_name,
+            key=base64.b64decode(data['key']) if data['key'] is not None else None,
+            value=base64.b64decode(data['value']) if data['value'] is not None else None,
             partition=data['partition'],
             timestamp_ms=data['timestamp']
         )

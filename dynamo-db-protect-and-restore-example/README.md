@@ -1,5 +1,16 @@
 # Backup DynamoDB Tables using Elastio
 
+## Requirements
+- Python 3
+- Boto 3
+
+## Installing Boto 3 on Ubuntu
+
+```
+sudo apt update
+sudo apt install python3-boto3
+```
+
 ## Create a DynamoDB table and write some data to it
 
 - Create a "Music" table in Amazon DynamoDB. The table should have the following details:

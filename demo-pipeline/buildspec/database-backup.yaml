@@ -1,0 +1,35 @@
+version: 0.2
+env:
+  exported-variables:
+    - JOB_ID
+    - ABORT_TOKEN
+    - DB_RESTORE_POINT
+  secrets-manager:
+    PGHOST: demoapp/database/demo/credentials:hostname
+    PGPORT: demoapp/database/demo/credentials:port
+    PGUSER: demoapp/database/demo/credentials:username
+    PGPASSWORD: demoapp/database/demo/credentials:password
+    PGDATABASE: demoapp/database/demo/credentials:database
+phases:
+  install:
+    commands:
+      - apt update
+      - apt -yq install jq curl gnupg
+      - curl -o - https://www.postgresql.org/media/keys/ACCC4CF8.asc | gpg --dearmor > /usr/share/keyrings/pgdg-archive-keyring.gpg
+      - RELEASE=$(awk -F= '/^UBUNTU_CODENAME/ {print $NF}' /etc/os-release)
+      - echo "deb [signed-by=/usr/share/keyrings/pgdg-archive-keyring.gpg] http://apt.postgresql.org/pub/repos/apt/ ${RELEASE}-pgdg main" >/etc/apt/sources.list.d/pgdg.list
+      - curl -OfsSL https://raw.githubusercontent.com/elastio/elastio-stack/master/scripts/install-elastio.sh
+      - chmod a+x install-elastio.sh
+      - ./install-elastio.sh -c
+      - apt -yq install postgresql-client-13
+  build:
+    commands:
+      - echo "Backing up database ${PGDATABASE} at ${PGHOST}:${PGPORT}"
+      - OUTPUT=$(pg_dump | elastio stream backup --stream-name pre-migration-$CODEBUILD_RESOLVED_SOURCE_VERSION --tag release:$CODEBUILD_RESOLVED_SOURCE_VERSION --output-format json)
+      - echo "${OUTPUT}"
+      - export JOB_ID=$(echo "${OUTPUT}" | jq -r '.job_id')
+      - export ABORT_TOKEN=$(echo "${OUTPUT}" | jq -r '.data.abort_token')
+      - export DB_RESTORE_POINT=$(echo "${OUTPUT}" | jq -r '.data.rp_id')
+  post_build:
+    commands:
+      - echo "***************************\n* DB_RESTORE_POINT is $DB_RESTORE_POINT\n*\n***************************"

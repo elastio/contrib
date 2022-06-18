@@ -1,0 +1,17 @@
+version: 0.2
+env:
+  exported-variables:
+    - INSTANCE_RP_ID
+phases:
+  install:
+    commands:
+      - apt update
+      - apt -yq install jq
+      - curl -OfsSL https://raw.githubusercontent.com/elastio/elastio-stack/master/scripts/install-elastio.sh
+      - chmod a+x install-elastio.sh
+      - ./install-elastio.sh -c
+  build:
+    commands:
+      - echo "**********\n*\n* Waiting for job $JOB_ID\n*\n**********\n"
+      - demo-pipeline/scripts/job-wait.sh ${JOB_ID}
+      - if [ -f rp_id ]; then export INSTANCE_RP_ID=$(cat rp_id); else exit 127; fi

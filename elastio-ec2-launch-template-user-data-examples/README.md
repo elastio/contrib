@@ -19,7 +19,7 @@ Click on Create role
 
 Select AWS Service and select EC2 from the Common use cases.
 
-Filter the policies you wish to assign to the role. Elastio comes with 6 policies. Assign all the Elastio policies to your role. See [Elastio Policies](https://docs.elastio.com/src/getting-started/elastio-policies.html) for more details.
+Filter the policies you wish to assign to the role. Elastio comes with 6 policies. Assign only the policies required to perform your operation to your role. See [Elastio Policies](https://docs.elastio.com/src/getting-started/elastio-policies.html) for more details.
 
 Give the role a name and click create role.
 
@@ -36,10 +36,10 @@ See (AWS Docs)[https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-launch-te
 
 #### Describe Template
 
-Replace 'lt-02c867d3e704fa873' with your template ID and '6' with your current template version.
+Replace '{template_id}' with your template ID and '{template_version}' with your current template version.
 
 ```
-aws ec2 describe-launch-template-versions --launch-template-id lt-02c867d3e704fa873 --versions 6
+aws ec2 describe-launch-template-versions --launch-template-id {template_id} --versions {template_version}
 ```
 
 ---
@@ -47,7 +47,7 @@ aws ec2 describe-launch-template-versions --launch-template-id lt-02c867d3e704fa
 ### Create New EC2 from Launch Template
 
 ```
-aws ec2 run-instances --launch-template LaunchTemplateId=lt-02c867d3e704fa873,Version=6
+aws ec2 run-instances --launch-template LaunchTemplateId={template_id},Version={template_version}
 ```
 ---
 ### Demo using EC2 Launch template to automate running Elastio stream backup on a DynamoDB

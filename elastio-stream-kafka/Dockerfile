@@ -15,5 +15,5 @@ COPY elastio_stream_kafka.py ./
 COPY docker_backup_app.py ./
 COPY docker_backup_config.py ./
 
-ENTRYPOINT [ ]
-CMD python3 docker_backup_app.py
+ENTRYPOINT ["python3"]
+CMD ["docker_backup_app.py"]

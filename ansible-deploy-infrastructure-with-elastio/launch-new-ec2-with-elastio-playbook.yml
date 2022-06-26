@@ -1,0 +1,123 @@
+---
+- hosts: localhost
+  tasks:
+    #
+    # Usage: ansible-playbook filename.yml
+    #  --extra-vars "
+    #  ami=[AMI_VALUE]
+    #  ssh_key=[SSH-KEY]
+    #  instance_type=[INSTANCE-TYPE]
+    #  os_type=[OS-TYPE]
+    #  security_group=[SECURITY-GROUP]
+    #  vpc_subnet_id=[VPC-SUBNET-ID]
+    #  region=[REGION]
+    #  profile=[IAM_PROFILE_NAME]
+    #  "
+    #
+    # ami : This should be a valid AMI on the AWS Market place
+    # ssh_key: This is the name of your SSH key located on your AWS account
+    # instance_type: Example: t3.medium
+    # os_type: ubuntu | aws_linux (pass only one value)
+    # security_group: The security group ID
+    # vpc_subnet_id: The VPC subnet ID
+    # region: The region to deploy the new EC2. IE: us-east-1
+    # profile: The IAM Profile with the permissions assigned
+
+    - name: "Checking AMI was passed to playbook"
+      fail:
+        msg: "variable 'ami' is undefined"
+      when: "ami is undefined"
+
+    - name: "Checking SSH-KEY was passed to playbook"
+      fail:
+        msg: "variable 'ssh_key' is undefined"
+      when: "ssh_key is undefined"
+
+    - name: "Checking INSTANCE-TYPE was passed to playbook"
+      fail:
+        msg: "variable 'instance_type' is undefined"
+      when: "instance_type is undefined"
+
+    - name: "Checking OS-TYPE was passed to playbook"
+      fail:
+        msg: "variable 'os_type' is undefined"
+      when: "os_type is undefined"
+
+    - name: "Checking SECURITY-GROUP was passed to playbook"
+      fail:
+        msg: "variable 'security_group' is undefined"
+      when: "security_group is undefined"
+
+    - name: "Checking VPC was passed to playbook"
+      fail:
+        msg: "variable 'vpc_subnet_id' is undefined"
+      when: "vpc_subnet_id is undefined"
+
+    - name: "Checking REGION was passed to playbook"
+      fail:
+        msg: "variable 'region' is undefined"
+      when: "region is undefined"
+
+    - name: "Checking PROFILE was passed to playbook"
+      fail:
+        msg: "variable 'profile' is undefined"
+      when: "profile is undefined"
+
+    - name: "Create EC2 Instance"
+      ec2:
+        key_name: "{{ ssh_key }}"
+        instance_type: "{{ instance_type }}"
+        image: "{{ ami }}"
+        wait: true
+        count: 1
+        group_id: "{{ security_group }}"
+        vpc_subnet_id: "{{ vpc_subnet_id }}"
+        region: "{{ region }}"
+        instance_profile_name: "{{ profile }}"
+      register: ec2
+
+    - name: "Tag new instance"
+      ec2_tag:
+        region: "{{ region }}"
+        resource: "{{ ec2.instances[0].id }}"
+        tags:
+          Name: "New Elastio EC2 Deployment"
+      register: ec2_tag
+
+    - name: "Wait for OS to start"
+      pause:
+        seconds: 60
+
+    - name: "Fetch remote SSH Key"
+      command: ssh-keyscan -T5 {{ ec2.instances[0].public_ip }}
+      register: keyscan
+      ignore_errors: yes
+
+    - name: "Add ssk-key to local known_hosts"
+      lineinfile:
+        name: ~/.ssh/known_hosts
+        create: yes
+        line: "{{ item }}"
+      with_items: '{{ keyscan.stdout_lines|default([]) }}'
+      register: update_known_hosts
+      ignore_errors: yes
+
+    - name: "Install AWS CLI : Ubuntu"
+      command: >
+        bash scripts/ubuntu-install-aws-cli.sh {{ ec2.instances[0].public_ip }} {{ ssh_key }}
+      when: os_type == "ubuntu"
+
+    - name: "Install Elastio CLI : Ubuntu"
+      command: >
+        bash scripts/ubuntu-install-elastio.sh {{ ec2.instances[0].public_ip }} {{ ssh_key }}
+      when: os_type == "ubuntu"
+
+    - name: "Install AWS CLI : AWS-Linux"
+      command: >
+        bash scripts/aws-linux-install-aws-cli.sh {{ ec2.instances[0].public_ip }} {{ ssh_key }}
+      when: os_type == "aws_linux"
+
+    - name: "Install Elastio CLI : AWS-Linux"
+      command: >
+        bash scripts/aws-linux-install-elastio.sh {{ ec2.instances[0].public_ip }} {{ ssh_key }}
+      when: os_type == "aws_linux"

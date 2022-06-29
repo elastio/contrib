@@ -45,7 +45,7 @@ Click on Create role
 
 Select AWS Service and select EC2 from the Common use cases.
 
-Filter the policies you wish to assign to the role. Elastio comes with 6 policies. Assign only the policies required to perform your operation to your role. See [Elastio Policies](https://docs.elastio.com/src/getting-started/elastio-policies.html) for more details.
+Filter the policies you wish to assign to the role. Elastio comes with several pre-defined IAM policies, all starting with the prefix `Elastio`. Assign only the policies required to perform your operation to your role. See [Elastio Policies](https://docs.elastio.com/src/getting-started/elastio-policies.html) for more details.
 
 Give the role a name and click create role.
 

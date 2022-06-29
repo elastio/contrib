@@ -28,14 +28,14 @@ In this example we will cover Ubuntu 20.04 and AWS Linux 2.
 
 ### Playbook Parameters
 
-- ami : This should be a valid AMI on the AWS Marketplace
-- ssh_key: This is the name of your SSH key located on your AWS account
-- instance_type: Example: t3.medium
-- os_type: ubuntu | aws_linux (pass only one value)
-- security_group: The security group ID
-- vpc_subnet_id: The VPC subnet ID
-- region: The region to deploy the new EC2. Example: [us-east-1](https://docs.aws.amazon.com/general/latest/gr/rande.html)
-- profile: The IAM Profile with the permissions assigned
+- `ami` : This should be a valid AMI on the AWS Marketplace
+- `ssh_key`: This is the name of your SSH key located on your AWS account
+- `instance_type`: Example: t3.medium
+- `os_type`: ubuntu | aws_linux (pass only one value)
+- `security_group`: The security group ID
+- `vpc_subnet_id`: The VPC subnet ID
+- `region`: The region to deploy the new EC2. Example: [us-east-1](https://docs.aws.amazon.com/general/latest/gr/rande.html)
+- `profile`: The IAM Profile with the permissions assigned
 
 ### IAM Role
 

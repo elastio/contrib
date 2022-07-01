@@ -3,7 +3,6 @@ import os
 import argparse
 import logging
 import subprocess
-import ast
 import base64
 import json
 
@@ -11,7 +10,13 @@ from kafka import KafkaConsumer, TopicPartition, KafkaProducer
 from common import id_generator, new_message_exists
 
 
-logging.basicConfig(level=logging.CRITICAL)
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s][%(levelname)s][%(filename)s:%(lineno)d]:%(message)s',
+    handlers=[
+        logging.FileHandler("elastio-stream-kafka.log"),
+    ]
+)
 
 parser = argparse.ArgumentParser(
     prog="Elastio stream kafka",
@@ -33,6 +38,7 @@ restore_parser.add_argument("--brokers", required=True, type=str, nargs="+", hel
 
 # parse brokers, topic_name, valult, rp_id from the script arguments.
 args = parser.parse_args()
+logging.info(f"Arguments:{args}")
 
 if args.mod == "backup":
     bootstrap_servers = args.brokers
@@ -51,6 +57,7 @@ if args.mod == "backup":
         consumer_timeout_ms=10000, # 10s
         api_version=(0, 10, 1)
     )
+    #logging.info("")
 
     """
     Call Elastio CLI to get stream recovery points list.
@@ -75,6 +82,7 @@ if args.mod == "backup":
             except KeyError:
                 continue
     print(f"Topic previously backed up: {topic_previously_backed_up}")
+    logging.info(f"Topic previously backed up: {topic_previously_backed_up}")
 
     # Get topic partition count.
     partitions = consumer.partitions_for_topic(topic_name)
@@ -96,11 +104,13 @@ if args.mod == "backup":
     """
     if True in new_message_info.values():
         print(f"Elastio starting backup {args.topic_name} topic.")
+        logging.info(f"Elastio starting backup {args.topic_name} topic.")
         override_hostname = "{cluster_name}:{topic_name}".format(
                 cluster_name=str(args.brokers[0].split('.')[1]),
                 topic_name=args.topic_name
                 )
         # Running elastio stream backup command in a parallel process to isolate it.
+        logging.info(f"Starting stream.")
         proc = subprocess.Popen(
             ['elastio', 'stream', 'backup', '--stream-name', topic_name, '--output-format', 'json', '--hostname-override', override_hostname, '--vault', args.vault],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
@@ -115,6 +125,7 @@ if args.mod == "backup":
                     # If True assign partition to topic.
                     consumer.assign([TopicPartition(topic_name, partition_key), ])
                     # Read and processing Kafka messages.
+                    logging.info("Reading records.")
                     for msg in consumer:
                         _key = f'partition_{str(partition_key)}_last_msg_offset'
                         if msg.offset > int(rp['tags'][_key]):
@@ -152,6 +163,7 @@ if args.mod == "backup":
                 if new_message_info[partition_key]:
                     # If True assign partition to topic.
                     consumer.assign([TopicPartition(topic_name, partition_key), ])
+                    logging.info("Reading records.")
                     for msg in consumer:
                         if first_message:
                             topic_info_data[f'partition_{str(partition_key)}_first_msg_offset'] = msg.offset
@@ -184,35 +196,45 @@ if args.mod == "backup":
         rp_info = json.loads(result)
         print(json.dumps(rp_info, indent=4))
         print(f"Status: {rp_info['status']}")
+        logging.info(f"Status: {rp_info['status']}")
         if rp_info['status'] == 'Succeeded':
             print(f"Recovery point ID: {rp_info['data']['rp_id']}")
+            logging.info(f"Recovery point ID: {rp_info['data']['rp_id']}")
             for _key, _value in topic_info_data.items():
                 os.system(f"elastio rp tag --rp-id {rp_info['data']['rp_id']} --tag {_key}={_value}")
 
     else:
         print("You don't have new message to backup")
+        logging.info("You don't have new message to backup")
     consumer.close()
+    logging.info("Consumer closed.")
+    logging.info("Backup finished.")
 
 elif args.mod == "restore":
     print(f"Elastio starting restore.\nRecovery point ID: {args.rp_id}")
+    logging.info(f"Elastio starting restore.\nRecovery point ID: {args.rp_id}")
     bootstrap_servers = args.brokers
     prod = KafkaProducer(bootstrap_servers=bootstrap_servers, api_version=(0, 10, 1))
-    res = subprocess.run(
-        ["elastio", "stream", "restore", "--rp", args.rp_id],
-        stdout=subprocess.PIPE)
     msg_count = 0
-    # Read data from elastio stream restore process.
-    # Load to json format.
-    datas = (json.loads(line.decode()) for line in res.stdout.splitlines())
-    for data in datas:
-        # Write data to the Kafka topic.
-        msg_stat = prod.send(
-            topic=args.topic_name,
-            key=base64.b64decode(data['key']) if data['key'] is not None else None,
-            value=base64.b64decode(data['value']) if data['value'] is not None else None,
-            partition=data['partition'],
-            timestamp_ms=data['timestamp']
-        )
-        msg_count+=1
-    prod.close()
+    # Run elastio stream restore process.
+    with subprocess.Popen(["elastio", "stream", "restore", "--rp", args.rp_id], stdout=subprocess.PIPE) as stream_restore:
+        # Read data from elastio stream restore process.
+        for line in stream_restore.stdout:
+            # Load to json format.
+            data = json.loads(line.decode())
+            # Write data to the Kafka topic.
+            msg_stat = prod.send(
+                topic=args.topic_name,
+                key=base64.b64decode(data['key']) if data['key'] is not None else None,
+                value=base64.b64decode(data['value']) if data['value'] is not None else None,
+                partition=data['partition'],
+                timestamp_ms=data['timestamp']
+            )
+            msg_count+=1
+            if (msg_count % 1000000 == 0):
+                logging.info(line.decode())
+                logging.info(f"Processed data offset:{data['offset']}")
+                logging.info(f"Processed message count: {msg_count}")
+    logging.info(f"Processed message count: {msg_count}")
+    logging.info("Restore finished successfuly! Restored messeges count: {msg_count}".format(msg_count=msg_count))
     print("Restore finished successfuly!\nRestored messeges count: {msg_count}".format(msg_count=msg_count))

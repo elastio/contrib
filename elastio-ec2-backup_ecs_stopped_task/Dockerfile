@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1
 
 # Version elastio cli what will use like base image.
-# Most likely this is not the latest version of elastio cli.
 # You can find the latest version at this link.
 # https://gallery.ecr.aws/elastio-dev/elastio-cli
 FROM public.ecr.aws/elastio-dev/elastio-cli:latest

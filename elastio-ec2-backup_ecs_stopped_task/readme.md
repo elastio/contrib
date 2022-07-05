@@ -1,4 +1,4 @@
-# Elastio ec2 backup ecs stopped task
+# Elastio EC2 backup ECS stopped task
 1. Create ECR polices:
     1. From AWS console, select "IAM service" =>`Policies` =>'Create Policy'.
     2. Under the **Service** tab select `Elastic Container Registry`.
@@ -15,15 +15,14 @@
         1. In the navigation pane, choose "Roles" =>"Create role".
         2. In the "Select type of trusted entity section", choose "AWS service" => "Elastic Container Service".
         3. In "Select your use case", select the "Elastic Container Service Task", then choose "Next": "Permissions".
-        4. In the "Attach permissions policies" section, search for ```AmazonECSTaskExecutionRolePolicy, SecretsManagerReadWrite, ECR_FullAccess, AmazonECS_FullAccess, ElastioFullAdmin``` select "Policies", then choose "Next": "Tags".
+        4. In the "Attach permissions policies" section, search for ```AmazonECSTaskExecutionRolePolicy, SecretsManagerReadWrite, ECR_FullAccess, AmazonECS_FullAccess, ElastioBackupAdmin``` select "Policies", then choose "Next": "Tags".
         5. For Add tags (optional), specify custom tags to associate with the policy and then choose "Next": "Review".
         6. For Role name, type `ecs_task_execution_role` and choose "Create role".
 
 3. Build and push a docker image:
-    > Before you start this section, review the dockerfile and read its comments.
     > You can find the latest version by following this link. https://gallery.ecr.aws/elastio-dev/elastio-cli
     1. Edit file contrib/elastio-ec2-backup-ecs-stopped-task/failed_ecs_handler_config.py and put data about topic, brokers, vault.
-    2. Create ECR respository.
+    2. Create ECR repository.
     3. Register your docker cli by getting the ecr public image with the command:
         ```aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws```
     4. Open the ECR repository you have created earlier and press the button "View push commands". The screen will list four commands. Run them in your terminal to build the docker image.

@@ -1,5 +1,8 @@
 
-import boto3, subprocess, datetime, json
+import boto3
+import subprocess
+import datetime
+import json
 
 from failed_ecs_handler_config import CLUSTER_NAME
 
@@ -50,4 +53,4 @@ if tasks != []:
             else:
                 print(f"The time to backup task {task_arn} has expired.")
 else:
-    print("You don't have stopped task.")
+    print("You don't have any stopped tasks.")

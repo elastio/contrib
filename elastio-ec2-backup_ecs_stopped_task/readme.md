@@ -2,7 +2,7 @@
 
 ## Step 1 - Create ECR polices
 
-1. From AWS console, select "IAM service" =>`Policies` =>'Create Policy'.
+1. From AWS console, select "IAM service" => `Policies` => "Create Policy".
 1. Under the **Service** tab select `Elastic Container Registry`.
 1. Under the **Actions** tab select `All Elastic Container Registry actions (ecr:*)`.
 1. Under the **Resources** tab select `specific` =>`Add ARN`.

@@ -13,13 +13,13 @@
 ## Step 2 - Roles
 
 1. From AWS console, select IAM service =>`Roles`.
-1. If you already have a role for ECS tasks, add the following permissions:
+1. If you already have a role for ECS tasks, add the following policies to the role:
 
-    1. AmazonECSTaskExecutionRolePolicy,
-    1. SecretsManagerReadWrite,
-    1. AmazonECS_FullAccess,
-    1. ECR_FullAccess,
-    1. ElastioBackupAdmin
+    1. `AmazonECSTaskExecutionRolePolicy`
+    1. `SecretsManagerReadWrite`
+    1. `AmazonECS_FullAccess`
+    1. `ECR_FullAccess`
+    1. `ElastioBackupAdmin`
 
     or create a new role with these permissions.
 Creating a new role follow these steps:
@@ -31,11 +31,11 @@ Creating a new role follow these steps:
     then choose "Next": "Permissions".
 1. In the "Attach permissions policies" section, search for
 
-    1. AmazonECSTaskExecutionRolePolicy,
-    1. SecretsManagerReadWrite,
-    1. AmazonECS_FullAccess,
-    1. ECR_FullAccess,
-    1. ElastioBackupAdmin
+    1. `AmazonECSTaskExecutionRolePolicy`
+    1. `SecretsManagerReadWrite`
+    1. `AmazonECS_FullAccess`
+    1. `ECR_FullAccess`
+    1. `ElastioBackupAdmin`
 
     select "Policies", then choose "Next": "Tags".
 1. For Add tags (optional), specify custom tags to
@@ -50,7 +50,7 @@ Creating a new role follow these steps:
 1. Edit file contrib/elastio-ec2-backup-ecs-stopped-task/failed_ecs_handler_config.py
     and put data about topic, brokers, vault.
 1. Create ECR repository.
-1. Register your docker cli by getting the ecr public image with the command:
+1. Register your docker CLI by getting the ECR public image with the command:
 
     ```console
     aws ecr-public get-login-password --region us-east-1 | \

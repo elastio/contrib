@@ -7,7 +7,7 @@ oracleDbPort='1521'
 oracleDbSID='ORCL'
 
 s3BucketName='oracle2291'
-oracleBackupDir='BKP02'
+oracleBackupDir='DATA_PUMP_DIR'
 
 sqlplus $oracleDbUser/$oracleDbPassword@$oracleDbHostname:$oracleDbPort/$oracleDbSID <<EOF
 DECLARE 

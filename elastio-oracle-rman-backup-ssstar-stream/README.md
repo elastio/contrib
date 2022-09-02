@@ -26,5 +26,8 @@ Test connection to the Oracle RDS instans:
 ```
 sqlplus username/password@aws-rds-hostname:1521/SID
 ```
+Make sure Elastio CLI is configured and has connection to the Elastio vault.
 
-Change script variables according to your environment configuration and run script.
+Change script variables (Oracle DB credentials, s3 bucket name) according to your environment configuration and run script.
+
+Script will create Oracle backup, upload backup to s3 bucket and stream files from s3 bucket to the elastio vault.

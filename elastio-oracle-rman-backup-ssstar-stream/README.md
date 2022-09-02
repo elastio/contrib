@@ -28,6 +28,16 @@ sqlplus username/password@aws-rds-hostname:1521/SID
 ```
 Make sure Elastio CLI is configured and has connection to the Elastio vault.
 
-Change script variables (Oracle DB credentials, s3 bucket name) according to your environment configuration and run script.
+Change script variables (Oracle DB credentials, s3 bucket name) according to your environment configuration and run script:
+```
+oracleDbUser='admin'
+oracleDbPassword='password'
+oracleDbHostname='database1.cd4xq5de693v.us-east-2.rds.amazonaws.com'
+oracleDbPort='1521'
+oracleDbSID='ORCL'
+
+s3BucketName='oracle2291'
+oracleBackupDir='DATA_PUMP_DIR'
+```
 
 Script will create Oracle backup, upload backup to s3 bucket and stream files from s3 bucket to the elastio vault.

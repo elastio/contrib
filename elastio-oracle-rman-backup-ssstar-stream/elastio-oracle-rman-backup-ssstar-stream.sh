@@ -6,9 +6,10 @@ oracleDbHostname='database1.cd4xq5de693v.us-east-2.rds.amazonaws.com'
 oracleDbPort='1521'
 oracleDbSID='ORCL'
 
-s3BucketName='oracle2291'
+s3BucketName='oraclebackup2291'
 oracleBackupDir='DATA_PUMP_DIR'
 
+#Execute Oracle backup and s3 upload script via sqlplus
 sqlplus $oracleDbUser/$oracleDbPassword@$oracleDbHostname:$oracleDbPort/$oracleDbSID <<EOF
 DECLARE 
 V_TASKID VARCHAR2(100);
@@ -44,5 +45,6 @@ END;
 /
 EOF
 
+#Stream archive from s3 to elastio via ssstar
 ssstar create s3://$s3BucketName --stdout \
   | elastio stream backup --hostname-override $oracleDbHostname --stream-name $oracleDbSID

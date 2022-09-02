@@ -1,0 +1,30 @@
+# Oracle Backup via RMAN, ssstar and Elastio
+
+---
+
+Script uses `rdsadmin.rdsadmin_rman_util` and `rdsadmin.rdsadmin_s3_tasks.upload_to_s3` Amazon RDS procedures to backup Oracle DB instance and upload backed up files from your DB instance to an Amazon S3 bucket. Then streams the files to Elastio using `ssstar` utility.
+
+**Useful articles:**
+ - [Performing common RMAN tasks for Oracle DB instances](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.Oracle.CommonDBATasks.RMAN.html)
+ - [Amazon S3 integration](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/oracle-s3-integration.html)
+
+## Requirements
+- [ssstar](https://github.com/elastio/ssstar)
+- [Oracle Instant Client](https://www.oracle.com/database/technologies/instant-client/downloads.html)
+- AWS CLI
+- Elastio CLI
+
+## Usage
+
+Copy the script to instance with next software instelled:
+- ssstar
+- Oracle Instant Client including sqlplus
+- AWS CLI
+- Elastio CLI
+
+Test connection to the Oracle RDS instans:
+```
+sqlplus username/password@aws-rds-hostname:1521/SID
+```
+
+Change script variables according to your environment configuration and run script.

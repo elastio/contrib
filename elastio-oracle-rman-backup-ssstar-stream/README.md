@@ -20,7 +20,7 @@ Copy the script to instance with next software instelled:
 - ssstar
 - Oracle Instant Client including sqlplus
 - AWS CLI
-- Elastio CLI
+- `elastio` CLI
 
 Test connection to the Oracle RDS instans:
 ```

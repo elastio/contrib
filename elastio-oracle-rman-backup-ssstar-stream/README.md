@@ -16,7 +16,7 @@ Script uses `rdsadmin.rdsadmin_rman_util` and `rdsadmin.rdsadmin_s3_tasks.upload
 
 ## Usage
 
-Copy the script to instance with next software instelled:
+Copy the script to instance with next software installed:
 - `ssstar`
 - Oracle Instant Client including sqlplus
 - AWS CLI

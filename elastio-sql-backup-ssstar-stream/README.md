@@ -14,8 +14,9 @@
 
 ### Backup procedure
 1. Add `SQLSERVER_BACKUP_RESTORE` to an option group on your DB instance
+
 	See: [Support for native backup and restore in SQL Server](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.SQLServer.Options.BackupRestore.html)
-2. Using SSMS or sqlcmd run query to create a backup:
+3. Using SSMS or sqlcmd run query to create a backup:
 	```
 	exec msdb.dbo.rds_backup_database
 		@source_db_name='database_name',

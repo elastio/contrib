@@ -13,10 +13,9 @@
 - Elastio CLI
 
 ### Backup procedure
-1. Create native backup of SQL on S3:
-1.1. Add `SQLSERVER_BACKUP_RESTORE` to an option group on your DB instance
+1. Add `SQLSERVER_BACKUP_RESTORE` to an option group on your DB instance
 	See: [Support for native backup and restore in SQL Server](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Appendix.SQLServer.Options.BackupRestore.html)
-1.2. Using SSMS or sqlcmd run query to create a backup:
+2. Using SSMS or sqlcmd run query to create a backup:
 	```
 	exec msdb.dbo.rds_backup_database
 		@source_db_name='database_name',
@@ -27,7 +26,7 @@
 		[@number_of_files=n];
 	```
 	See: [Importing and exporting SQL Server databases using native backup and restore](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/SQLServer.Procedural.Importing.html#SQLServer.Procedural.Importing.Native.Using.Backup)
-2. Backup file from S3 using `elastio` and `ssstar`:
+3. Backup file from S3 using `elastio` and `ssstar`:
 	```
 	ssstar create s3://s3-Bucket-Name --stdout \
 		| elastio stream backup --hostname-override SQL-DB-Hostname --stream-name SQL-Db-Name
@@ -67,7 +66,7 @@ elastio block backup <drive letter> --hostname-override SQL-DB-Hostname
 ### Restore procedure
 #### To the same location:
 1. Go to services and stop MS SQL Server service
-2. Run `elastio block restore --rp RP-ID <drive letter>
+2. Run `elastio block restore --rp RP-ID <drive letter>`
 3. Start MS SQL Server service
 
 #### To the new location:

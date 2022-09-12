@@ -1,3 +1,6 @@
+This article describs the procedure of backup and restore Miscrosoft SQL server databse. If your database hosted in Amazon RDS see [Amazon RDS SQL Server](https://github.com/elastio/contrib/edit/MSSQL/elastio-sql-backup-ssstar-stream/README.md#amazon-rds-sql-server), if you have selfhosted database see [self hosted SQL Server](https://github.com/elastio/contrib/edit/MSSQL/elastio-sql-backup-ssstar-stream/README.md#self-hosted-sql-server).
+
+
 # Amazon RDS SQL Server
 
 ---

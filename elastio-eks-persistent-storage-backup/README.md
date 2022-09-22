@@ -27,7 +27,7 @@ elastio ebs backup --volume-id <volume ID>
 Use `--iscan` option to run vulnerability scan immediately after backup.
 
 ## Restore procedure
-As a result of backup a recovery point will be created. You can find newly created recovery point and its scan status in WEB UI by following asset name link. Or as output of `elastio ebs backup` command.
+As a result of backup a recovery point will be created. You can find newly created recovery point and its scan status in WEB UI by following asset name link. Or in the output of `elastio ebs backup` command.
 ![image](https://user-images.githubusercontent.com/81738703/191742622-1f353813-8216-4a5e-830e-538964f0f10f.png)
 
 ### Restore in WEB UI
@@ -40,10 +40,10 @@ As a result of backup a recovery point will be created. You can find newly creat
 ### Restore in elastio CLI
 To restore EBS persistent storage via elastio CLI use next command:
 ```
-elastio ebs restore --rp <recovery pint ID>
+elastio ebs restore --rp <recovery point ID>
 ```
 
-When restore job is finished new EBS volume will be created in AWS. You need to note the `<Volume ID>` of the new EBS. It will be used toCconfigure a pod to use restored EBS as persistent volume.
+When restore job is finished new EBS volume will be created in AWS. You need to note the `<Volume ID>` of the new EBS. It will be used to configure a pod to use restored EBS as persistent volume.
 
 ## Configure a pod to use restored EBS as persistent volume
 

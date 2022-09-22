@@ -43,7 +43,7 @@ To restore EBS persistent storage via elastio CLI use next command:
 elastio ebs restore --rp <recovery pint ID>
 ```
 
-When restore job is finished new EBS volume will be created in AWS.
+When restore job is finished new EBS volume will be created in AWS. You need to note the `<Volume ID>` of the new EBS. It will be used toCconfigure a pod to use restored EBS as persistent volume.
 
 ## Configure a pod to use restored EBS as persistent volume
 

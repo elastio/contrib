@@ -23,7 +23,7 @@ provider "aws" {
 }
 
 locals {
-  prefix = elastio-iscan
+  prefix = "elastio-iscan"
 }
 
 // Get the caller identity's session context to assign the role session name

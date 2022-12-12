@@ -10,6 +10,10 @@
 ## Configure EventBridge and SQS
 To configure EventBridge and SQS use Terraform and provided configuration file. It will create EventBridge bus and SQS with name: `elastio-iscan`.
 
+1. Create `Main.tf` file with the content provided below.
+2. Run `terraform init`
+3. Run `terraform apply`
+
 ```
 provider "aws" {
   default_tags {
@@ -92,7 +96,7 @@ elastio aws-backup import --rp-vault [rp-vault] --rp-arn [rp-arn] --iscan --send
 ```
 Where: 
 - `rp-vault` is a name of the vault where backup is stored
-- `rp-arn` arn of the backup you would like to scan
+- `rp-arn` ARN of the backup you would like to scan
 
 ## View scan report
 To get the report of the iscan go to SQS and open `elastio-iscan-receiver`. Navigate to `Send and receive` messages and press `Poll for messages`.

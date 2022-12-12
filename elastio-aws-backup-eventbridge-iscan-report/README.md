@@ -91,8 +91,8 @@ To scan AWS backup use followig command:
 elastio aws-backup import --rp-vault [rp-vault] --rp-arn [rp-arn] --iscan --send-event --event-bridge-bus elastio-iscan
 ```
 Where: 
-- [rp-vault] is a name of the vault where backup is stored
-- [rp-arn] arn of the backup you would like to scan
+- `rp-vault` is a name of the vault where backup is stored
+- `rp-arn` arn of the backup you would like to scan
 
 ## View scan report
 To get the report of the iscan go to SQS and open `elastio-iscan-receiver`. Navigate to `Send and receive` messages and press `Poll for messages`.

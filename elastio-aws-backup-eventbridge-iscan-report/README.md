@@ -116,19 +116,19 @@ To view recovery point status complete following actions:
 1. In left navigation menu go to `Assets` page
 2. Click on asset you would like to inspect
 
-Recovery point scan statues are displayed as red or green icons on each row of the list:
+Recovery point scan statuses are displayed as red or green icons on each row of the list:
 ![image](https://user-images.githubusercontent.com/81738703/207309210-1549e916-f358-4b2b-a34d-f122faa1f11d.png)
 
 ### Restore recovery point
-There is an option to restore EBS or EC2. To do a restore run one of the following command:
+There is an option to restore EBS or EC2. To do a restore run one of the following commands:
 ```
 elastio ebs restore --rp [rp-ID]
 elastio ec2 restore --rp [rp-ID]
 ```
-There is also an option to restore individual fies using `elastio mount` command:
+There is also an option to restore individual files using `elastio mount` command:
 ```
 sudo -E elastio mount rp --rp [rp-ID]
 ```
 
-This commands can be found in the restore or mount windows in elastio tenant. To see this command select `restore` option on the recovery point drop down menu.
+This commands can be found in the restore or mount windows in the elastio tenant. To see this command select `restore` or `mount` option on the recovery point drop down menu.
 ![image](https://user-images.githubusercontent.com/81738703/207312410-aa03fb22-abd4-4975-ba87-0e9b2319727e.png)

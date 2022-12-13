@@ -98,6 +98,7 @@ elastio aws-backup import --rp-vault [rp-vault] --rp-arn [rp-arn] --iscan --send
 Where: 
 - `rp-vault` is a name of the vault where backup is stored
 - `rp-arn` ARN of the backup you would like to scan
+
 ![image](https://user-images.githubusercontent.com/81738703/207306745-fa4a8708-a4cb-461c-b5a9-e7ae9495b488.png)
 
 
@@ -114,6 +115,7 @@ Recovery points contain statuses of scans. There are 2 recovery options:
 To view recovery point status complete following actions:
 1. In left navigation menu go to `Assets` page
 2. Click on asset you would like to inspect
+
 Recovery point scan statues are displayed as red or green icons on each row of the list:
 ![image](https://user-images.githubusercontent.com/81738703/207309210-1549e916-f358-4b2b-a34d-f122faa1f11d.png)
 

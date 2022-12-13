@@ -1,4 +1,4 @@
-# Scan AWS backup for ransomware and malware and send the result to Amazon EventBridge
+# Scan AWS backup recovery point for ransomware and malware and send the result to Amazon EventBridge
 
 ---
 

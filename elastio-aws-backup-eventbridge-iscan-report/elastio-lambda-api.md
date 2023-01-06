@@ -110,12 +110,6 @@ OR
 
 ## Examples
 
-### Demo
-
-Here is a short demo recording of using and testing the API:
-
-https://user-images.githubusercontent.com/36276403/211019809-ac50528b-711c-45a2-b135-2b7aa1592851.mp4
-
 ### Success
 
 <details>
@@ -255,3 +249,9 @@ $ aws lambda invoke --function-name elastio-bg-jobs-service-aws-backup-rp-import
 ```
 
 </details>
+
+### Demo
+
+Here is a short demo recording of using and testing the API. Don't forget to press the unmute button in the video player bellow.
+
+https://user-images.githubusercontent.com/36276403/211019809-ac50528b-711c-45a2-b135-2b7aa1592851.mp4

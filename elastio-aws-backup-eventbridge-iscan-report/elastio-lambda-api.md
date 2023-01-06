@@ -35,12 +35,12 @@ The function accepts JSON input in the following format:
 
         // Name of the event bus iscan reports will be written to.
         //
-        // If absent or `null`, then the value from `/elastio/iscan-results-eventbridge-bus`
+        // Optional. If absent or `null`, then the value from `/elastio/iscan-results-eventbridge-bus`
         // SSM parameter will be used. If the SSM parameter isn't set, then the "Default"
         // event bus will be used as the final fallback.
         //
         // To specify the default event bus explicitly, a "Default" string may be passed.
-        "event_bridge_bus": "MyBusName",
+        "event_bridge_bus": "MyBusName"
     }
 }
 ```
@@ -109,6 +109,11 @@ OR
 ```
 
 ## Examples
+
+### Demo
+
+Here is a short demo recording of using and testing the API:
+![image](https://user-images.githubusercontent.com/36276403/211019809-ac50528b-711c-45a2-b135-2b7aa1592851.mp4)
 
 ### Success
 

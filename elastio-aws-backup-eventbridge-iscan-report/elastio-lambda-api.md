@@ -158,15 +158,6 @@ $ aws lambda invoke --function-name elastio-bg-jobs-service-aws-backup-rp-import
 
 </details>
 
-Notice that `misconfig` field is always explicitly set to `null`. At first, I thought to skip it when it is `null`, but then I though it's better to leave it like this at least for documentation purposes. Users will want to pay attention to this info to track wether there are any problems with their environment.
-
-Didn't test this scenario, but when there are problems in the VPC the misconfig will be an object like this:
-```json
-{
-     "subnets": ["subnet-arn-1", "subnet-arn-2"]
-}
-```
-
 ### Failure
 
 <details>

@@ -47,6 +47,9 @@ Where:
 
 ![image](https://user-images.githubusercontent.com/81738703/207306745-fa4a8708-a4cb-461c-b5a9-e7ae9495b488.png)
 
+### Scan using AWS Lambda API
+
+It's possible to invoke the same `elastio aws-backup import` operation as described in the section above using our AWS Lambda API. [It's described in detail here](elastio-lambda-api.md).
 
 ## View the raw scan report (optional)
 

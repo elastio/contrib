@@ -9,4 +9,22 @@
 .history/
 
 *.vsix
-demo-pipeline/terraform/.terraform.lock.hcl
+
+# Terraform local state
+*.tfstate
+*.tfstate*.backup
+
+# File with ad-hoc input values to simplify invoking terraform with same inputs multiple times
+terraform.tfvars
+
+# Terraform plugins dir
+.terraform
+
+# Terraform file lock
+.terraform.tfstate.lock
+.terraform.tfstate.lock.info
+
+# Usually, lock files are committed to VCS, but the goal of this repo is to have low overhead.
+# Lock files are needed to have reproducible deployments in real scenarios. We don't need
+# that in this repo, because our terraform projects are exemplary, and unlikely to break.
+.terraform.lock.hcl

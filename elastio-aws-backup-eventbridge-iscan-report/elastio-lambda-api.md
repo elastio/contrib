@@ -39,7 +39,7 @@ The function accepts JSON input in the following format:
         // SSM parameter will be used. If the SSM parameter isn't set, then the "Default"
         // event bus will be used as the final fallback.
         //
-        // If the default event bus is desired explicitly, then the "Default" string should be passed.
+        // To specify the default event bus explicitly, a "Default" string may be passed.
         "event_bridge_bus": "MyBusName",
     }
 }

@@ -3,132 +3,88 @@
 ---
 
 ## Prerequisites
-- Terraform
-- AWS CLI
-- Elastio CLI
+- [Terraform CLI]
+- [AWS CLI]
+- [Elastio CLI]
 
-## Configure EventBridge and SQS
-Scan report will be sent to the EventBridge bus. For testing purpose SQS queue could be created to poll and view sent events.
-To configure EventBridge and SQS use Terraform and provided configuration file. It will create EventBridge bus and SQS queue with name: `elastio-iscan`.
+## Configure EventBridge
+The scan reports will be sent to the [EventBridge event bus]. To create it use Terraform and the provided configuration file. It will create the EventBridge bus called `elastio-iscan` in your AWS account.
 
-Perform following steps:
-1. Create `Main.tf` file with the content provided below.
+Perform the following steps:
+1. Create `main.tf` file with the content provided below
 2. Run `terraform init`
 3. Run `terraform apply`
 
-```
-provider "aws" {
-  default_tags {
-    tags = {
-    }
-  }
-}
-
-locals {
-  prefix = "elastio-iscan"
-}
-
-// Get the caller identity's session context to assign the role session name
-// tag to created resources
-data "aws_caller_identity" "this" {}
-
-data "aws_iam_session_context" "this" {
-  arn = data.aws_caller_identity.this.arn
-}
+```tf
+# This will use the `default` AWS CLI profile
+provider "aws" {}
 
 resource "aws_cloudwatch_event_bus" "this" {
-  name = local.prefix
+  name = "elastio-iscan"
   tags = {
+    # ⚠️ This tag is important to grant Elastio write access to the bus
     "elastio:iscan-event-bus" = "true"
   }
 }
-
-// Allows Event Bridge write to SQS. Is used for tests only.
-resource "aws_sqs_queue_policy" "allow_event_bridge_write_to_sqs" {
-  policy    = data.aws_iam_policy_document.allow_event_bridge_write_to_sqs.json
-  queue_url = aws_sqs_queue.this.id
-}
-
-data "aws_iam_policy_document" "allow_event_bridge_write_to_sqs" {
-  statement {
-    effect = "Allow"
-    principals {
-      type        = "Service"
-      identifiers = ["events.amazonaws.com"]
-    }
-    actions   = ["sqs:SendMessage"]
-    resources = [aws_sqs_queue.this.arn]
-  }
-}
-
-resource "aws_cloudwatch_event_target" "sqs" {
-  rule           = aws_cloudwatch_event_rule.this.name
-  arn            = aws_sqs_queue.this.arn
-  event_bus_name = aws_cloudwatch_event_bus.this.name
-}
-
-resource "aws_cloudwatch_event_rule" "this" {
-  name           = local.prefix
-  event_pattern  = jsonencode({ source = ["elastio.iscan"] })
-  event_bus_name = aws_cloudwatch_event_bus.this.name
-}
-
-resource "aws_sqs_queue" "this" {
-  name = "${local.prefix}-receiver"
-}
-
-output "event_bus_arn" {
-  value = aws_cloudwatch_event_bus.this.arn
-}
-
-output "event_bus_name" {
-  value = aws_cloudwatch_event_bus.this.name
-}
-
-output "sqs_queue_url" {
-  value = aws_sqs_queue.this.id
-}
 ```
 
-## Scan AWS backup
-To scan AWS backup use command below. It will import AWS backup to elastio and run vulnerability scan.
-```
+### Deploy the SQS subscriber to EventBridge to view raw events (optional)
+
+This section is optional. Feel free to skip. This will be useful only if you want to review what raw JSON Elasio iscan reports are sent.
+
+For testing purposes, an SQS queue could be created to *manually* view sent events. Use [this terraform configuration](eventbridge-sqs.tf) file to create an EventBridge bus with the SQS queue subscribed to it.
+
+This way Elastio iscan reports will be sent to the SQS queue named `elastio-iscan-receiver`, where you can poll and view them as described in the [further section](#view-the-raw-scan-report-optional).
+
+## Scan an AWS Backup recovery point
+Use the command below to import an AWS backup recovery point (RP) to Elastio and run a vulnerability scan.
+```bash
 elastio aws-backup import --rp-vault [rp-vault] --rp-arn [rp-arn] --iscan --send-event --event-bridge-bus elastio-iscan
 ```
-Where: 
-- `rp-vault` is a name of the vault where backup is stored
-- `rp-arn` ARN of the backup you would like to scan
+Where:
+- `rp-vault` is the name of the vault where the AWS Backup RP is stored
+- `rp-arn` ARN of the AWS Backup RP you would like to scan
 
 ![image](https://user-images.githubusercontent.com/81738703/207306745-fa4a8708-a4cb-461c-b5a9-e7ae9495b488.png)
 
 
-## View scan report
-To get the report of the iscan go to SQS and open `elastio-iscan-receiver`. Navigate to `Send and receive messages` and press `Poll for messages`.
+## View the raw scan report (optional)
+
+This step is optional. Feel free to skip. To see the raw JSON report of the iscan first make sure to do the steps described in [this section](#deploy-the-sqs-subscriber-to-eventbridge-to-view-raw-events-optional). Once that is done, go to SQS and open `elastio-iscan-receiver`. Navigate to `Send and receive messages` and press `Poll for messages`.
+
 ![image](https://user-images.githubusercontent.com/81738703/207305818-66544b86-b4fb-4007-ad2a-e0c8e932e1bc.png)
 
-## Recover from healthy recovery point
-Recovery points contain statuses of scans. There are 2 recovery options:
-- Restore entire recovery point using `elastio restore` command 
-- Restore individual files from recovery point using `elastio mount` command
+## Recover from a healthy recovery point
+Recovery points contain the statuses of scans. There are 2 recovery options:
+- Restore an entire recovery point using `elastio restore` command
+- Restore individual files from a recovery point using `elastio mount` command
 
 ### View recovery point statuses in elastio tenant
-To view recovery point status complete following actions:
-1. In left navigation menu go to `Assets` page
-2. Click on asset you would like to inspect
+To view the recovery point status complete the following actions:
+1. In the left navigation menu go to `Assets` page
+2. Click on the asset you would like to inspect
 
 Recovery point scan statuses are displayed as red or green icons on each row of the list:
+
 ![image](https://user-images.githubusercontent.com/81738703/207309210-1549e916-f358-4b2b-a34d-f122faa1f11d.png)
 
-### Restore recovery point
-There is an option to restore EBS or EC2. To do a restore run one of the following commands:
+### Restore from a recovery point
+There is an option to restore an EBS volume or an EC2 instance. To do a restore run one of the following commands:
 ```
 elastio ebs restore --rp [rp-ID]
 elastio ec2 restore --rp [rp-ID]
 ```
+
 There is also an option to restore individual files using `elastio mount` command:
 ```
 sudo -E elastio mount rp --rp [rp-ID]
 ```
 
-This commands can be found in the restore or mount windows in the elastio tenant. To see this command select `restore` or `mount` option on the recovery point drop down menu.
+These commands can be found in the restore or mount dialog windows in the elastio tenant. To see this command select `Restore` or `Mount` option in the recovery point drop-down menu.
+
 ![image](https://user-images.githubusercontent.com/81738703/207312410-aa03fb22-abd4-4975-ba87-0e9b2319727e.png)
+
+[Terraform CLI]: https://developer.hashicorp.com/terraform/downloads?product_intent=terraform
+[AWS CLI]: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+[Elastio CLI]: https://docs.elastio.com/src/getting-started/install-cli
+[EventBridge event bus]: https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-event-bus.html

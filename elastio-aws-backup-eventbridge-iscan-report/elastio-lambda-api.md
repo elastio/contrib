@@ -113,7 +113,8 @@ OR
 ### Demo
 
 Here is a short demo recording of using and testing the API:
-![image](https://user-images.githubusercontent.com/36276403/211019809-ac50528b-711c-45a2-b135-2b7aa1592851.mp4)
+
+https://user-images.githubusercontent.com/36276403/211019809-ac50528b-711c-45a2-b135-2b7aa1592851.mp4
 
 ### Success
 

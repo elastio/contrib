@@ -199,7 +199,7 @@ Resources:
               s3_log_bucket = os.environ.get('LogsBucketName') 
               if not s3_log_bucket:
                   raise Exception('LogsBucketName is missing!') 
-              s3_log_location = 'elastio-scan-results/'
+              s3_log_location = 'elastio-scan-results/' + job_id + '.json'
 
               try:
                   print(f"Persisting event data to : {s3_log_bucket} at {s3_log_location}")

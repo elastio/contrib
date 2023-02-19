@@ -16,7 +16,6 @@ Customers can recover entire instances, selected volumes, or individual files in
 
 The deduplication process eliminates duplicated data blocks across multiple snapshots, reducing the amount of object storage required to store them. The compression process reduces the size of the snapshots, further reducing the storage and time required to transfer the data.
 
-
 ## AWS Backup and Elastio Architectures
 
 ### Single Account Deployment
@@ -52,6 +51,7 @@ The deduplication process eliminates duplicated data blocks across multiple snap
 7. Enter the ARN of Lamdba "elastio-bg-jobs-service-aws-backup-rp-import"
 8. Optionally use all defaults and follow the wizard to create the stack.
 
+NOTE: By deploying the AWS Backup Elastio integration using the Lambda provided, all backups will be scanned for all policies. In a future blog, instructions will be provided for creating custom backup rules for which recovery points are scanned.  This will involve modifying EventBridge.
 
   **Elastio_stack.yaml**
 ```
@@ -379,6 +379,18 @@ Elastio is deployed in the account that contains the AWS Backup Vault in which y
 4. Deploy the Cloud Connector in the same region and the AWS Backup Vault.
 5. Proceed to deploy the Job Trigger and Job Status Lambda’s as described above.
 6. If you have existing AWS Backup policies, they will work without changes. If not, create a policy to protect your EC2 instances.
+
+### Run Your First Backup and Scan
+
+1. From the AWS Backup console, create a on demand backup.
+2. Select and Instance to Backup
+3. ...
+4. The scan results artifacts will be available in the S3 bucket provided in the CloudFormation definition. The results are presented in JSON.
+
+From the Elastio Tenant.
+1. Select Jobs
+2. View the import and iscan jobs to validate the process.
+3. Once complete, from the job list, select the recovery point id and view the results.  
 
 ### Conclusion
 By using Elastio to enhance AWS Backup, organizations can secure their cloud data, reduce data loss and downtime, and improve Recovery Time Objectives (RTO) in case of an attack or application failure.   Elastio imports AWS Backups as globally deduplicated and compressed, resulting in improved scan performance, shorter recovery times, and cost savings.

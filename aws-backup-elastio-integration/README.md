@@ -6,7 +6,7 @@ One of the challenges with using AWS Backup is that customers often cannot be su
 
 Elastio scans for threats and corruption in backup data to address this issue, followed by recovery testing to ensure fast and clean restoration. This minimizes the risk of further infecting other resources and ensures that customers can quickly and easily recover their data.
 
-In addition, the results of each scan can be made available to Amazon S3 or sent to popular security platforms such as AWS Audit Manager, AWS SecurityHub, Splunk, and Datadog. This gives customers greater visibility into their backup data and allows them to protect against potential threats and corruption proactively.
+The results of each scan can be made available to Amazon S3 or sent to popular security platforms such as AWS Audit Manager, AWS SecurityHub, Splunk, and Datadog. This gives customers greater visibility into their backup data and allows them to protect against potential threats and corruption proactively.
 
 ![Picture1](https://user-images.githubusercontent.com/81738703/219877966-e0eea261-0946-412a-80c3-d03511c55fa7.png)
 

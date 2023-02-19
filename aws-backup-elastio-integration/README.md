@@ -45,6 +45,13 @@ The deduplication process eliminates duplicated data blocks across multiple snap
 
 1. Log in to the AWS Account where the AWS Backup Vault exists.
 2. Review the YAML below and deploy by Selecting CloudFormation and importing the YAML file.
+3. From CloudFormation console, select Create Stack, Select "With New Resources".
+4. Select "Upload Template File" and upload the YAML file.
+5. Enter the stack name "aws-backup-elastio-integration"
+6. Enter an S3 bucket name.  
+7. Enter the ARN of Lamdba "elastio-bg-jobs-service-aws-backup-rp-import"
+8. Optionally use all defaults and follow the wizard to create the stack.
+
 
   **Elastio_stack.yaml**
 ```

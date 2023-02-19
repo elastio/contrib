@@ -51,7 +51,7 @@ The deduplication process eliminates duplicated data blocks across multiple snap
 7. Enter the ARN of Lamdba "elastio-bg-jobs-service-aws-backup-rp-import"
 8. Optionally use all defaults and follow the wizard to create the stack.
 
-NOTE: By deploying the AWS Backup Elastio integration using the Lambda provided, all backups will be scanned for all policies. In a future blog, instructions will be provided for creating custom backup rules for which recovery points are scanned.  This will involve modifying EventBridge.
+NOTE: By using the Lambda provided in the AWS Backup Elastic integration, all backups will undergo scanning for all policies. In a future blog, instructions will be given on creating custom backup rules, which will involve modifying the Lambda that handles new AWS Backup events to exclude certain backups based on specific criteria.
 
   **Elastio_stack.yaml**
 ```

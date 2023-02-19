@@ -382,15 +382,16 @@ Elastio is deployed in the account that contains the AWS Backup Vault in which y
 
 ### Run Your First Backup and Scan
 
-1. From the AWS Backup console, create a on demand backup.
-2. Select and Instance to Backup
-3. ...
-4. The scan results artifacts will be available in the S3 bucket provided in the CloudFormation definition. The results are presented in JSON.
+1. From the AWS Backup console, go to Dashboard and select "Create on-demand backup".
+2. Select EC2 or EBS to backup and press "Create on-demand backup" button.
+3. The scan results artifacts will be available in the S3 bucket provided in the CloudFormation definition. The results are presented in JSON.
 
 From the Elastio Tenant.
 1. Select Jobs
 2. View the import and iscan jobs to validate the process.
 3. Once complete, from the job list, select the recovery point id and view the results.  
+
+![image](https://user-images.githubusercontent.com/81738703/219956284-582a780c-463b-4b69-81b7-8500b44a7962.png)
 
 ### Conclusion
 By using Elastio to enhance AWS Backup, organizations can secure their cloud data, reduce data loss and downtime, and improve Recovery Time Objectives (RTO) in case of an attack or application failure.   Elastio imports AWS Backups as globally deduplicated and compressed, resulting in improved scan performance, shorter recovery times, and cost savings.

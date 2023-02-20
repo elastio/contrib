@@ -29,6 +29,16 @@ Elastio imports AWS Backups as globally deduplicated and compressed, resulting i
 5. A Job Status Lambda function is triggered to copy the artifacts to an Amazon S3 bucket. 
 6. The artifacts are stored in S3. Alternatively, the lambda can be modified to send artifacts to any system, including SecurityHub, Datadog, and Splunk.
 
+### Cross Account Configuration
+
+1. AWS Backup creates a recovery point for an EC2 instance.
+2. An EventBridge event is triggered when the backup for the EC2 instance is completed.
+3. The event triggers a Lambda function that invokes an Elastio processing pipeline. The pipeline imports the recovery point and performs a cyber scan on all associated objects, including the EBS volumes and the AMI. 
+4. After the pipeline completes, detailed artifacts are generated and sent to EventBridge. 
+5. A Job Status Lambda function is triggered to copy the artifacts to an Amazon S3 bucket. 
+6. The artifacts are stored in S3. Alternatively, the lambda can be modified to send artifacts to any system, including SecurityHub, Datadog, and Splunk.
+
+
 ### Span of Control Account Isolation
 
 ![Picture3](https://user-images.githubusercontent.com/81738703/219877989-478ccc6f-1780-4064-a39c-48a0b3965b61.png)

@@ -14,7 +14,7 @@ In the event that a cyber threat is detected and needs to be remediated, Elastio
 
 Customers can recover entire instances, selected volumes, or individual files in a secure and isolated environment.  The entire process is run from within the customer’s AWS account. Elastio cannot view, access, or gain custody of customer data. 
 
-The deduplication process eliminates duplicated data blocks across multiple snapshots, reducing the amount of object storage required to store them. The compression process reduces the size of the snapshots, further reducing the storage and time required to transfer the data.
+Elastio imports AWS Backups as globally deduplicated and compressed, resulting in improved scan performance, shorter recovery times, and cost savings. The global deduplication process eliminates duplicated data blocks across multiple snapshots, reducing the amount of object storage required to store them. The compression process reduces the size of the snapshots, further reducing the storage and time required to transfer the data.
 
 ## AWS Backup and Elastio Architectures
 

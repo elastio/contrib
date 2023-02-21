@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
@@ -28,3 +27,5 @@ terraform.tfvars
 # Lock files are needed to have reproducible deployments in real scenarios. We don't need
 # that in this repo, because our terraform projects are exemplary, and unlikely to break.
 .terraform.lock.hcl
+
+.tmuxp.yaml

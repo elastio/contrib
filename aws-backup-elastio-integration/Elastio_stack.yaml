@@ -7,25 +7,19 @@ Metadata:
           default: Elastio Integration Configuration
         Parameters: 
             - LogsBucketName  
-            - ElastioImportLambdaARN     
             - LambdaTriggerTag
     ParameterLabels:
       LogsBucketName:
         default: S3 Bucket for Elastio Logs and Data 
-      ElastioImportLambdaARN:
-        default: The ARN of Elastio Lambda for importing a RecoveryPoint
       LambdaTriggerTag:
         default: RecoveryPoint Tag to initiate Elastio Scan
 Parameters:
   LogsBucketName:
     Description: The S3 Bucket Name where the Job Logs and Reports are to be stored. 
     Type: String
-  ElastioImportLambdaARN:
-    Description: The ARN of Elastio Lambda for importing a RecoveryPoint
-    Type: String  
   LambdaTriggerTag:
     Description: The Tag in an AWS Backup RecoveryPoint that will initiate an Elastio Scan
-    Type: String  
+    Type: String
 Resources: 
 
   ProcessAWSBackupVaultStatusEventRuleForElastio: 
@@ -102,7 +96,8 @@ Resources:
                         job_event_state = event_detail.get('status')
                     if job_event_state in ('COMPLETED'):
                         try:
-                            response = backup_client.list_tags(ResourceArn=destination_recovery_point_arn)
+                            backup_client = boto3.client('backup')
+                            response = backup_client.list_tags(ResourceArn=recovery_point_arn)
                             tag_list = response.get('Tags')
                             for key in tag_list:
                               if key.lower() == LAMBDA_TRIGGER_TAG.lower():
@@ -117,7 +112,7 @@ Resources:
                                         
                                       #invoke the lambda
                                       input_params = {
-                                                        "aws_backup_vault": backupvault_name,
+                                                        "aws_backup_vault": backup_vault_name,
                                                         "aws_backup_rp_arn": recovery_point_arn,
                                                         "iscan": {
                                                           "ransomware": True,
@@ -175,7 +170,7 @@ Resources:
         Variables:
           ElastioStatusEB : !Ref ElastioJobStatusEventBus 
           LogsBucketName: !Ref LogsBucketName
-          ElastioImportLambdaARN : !Ref ElastioImportLambdaARN
+          ElastioImportLambdaARN : !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-bg-jobs-service-aws-backup-rp-import"
           LambdaTriggerTag: !Ref LambdaTriggerTag
   ElastioJobStatusEventBus:
     Type: AWS::Events::EventBus
@@ -267,6 +262,7 @@ Resources:
               - Effect: Allow
                 Action:
                 - backup:ListTags
+                - ec2:DescribeTags
                 Resource: '*'                      
           - PolicyName: logStreamPermissions
             PolicyDocument:
@@ -277,23 +273,6 @@ Resources:
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
                 Resource: !Sub 'arn:${AWS::Partition}:logs:*:*:*'                        
-
-  ElastioStatusLogsDB:
-    Type: AWS::Glue::Database
-    Properties:
-      CatalogId: !Ref "AWS::AccountId"
-      DatabaseInput:
-        Description: ElastioStatusLogsDB
-        Name: elastio-logs-db
-  AthenaWorkgroup:
-    Type: AWS::Athena::WorkGroup
-    Properties: 
-      Name: !Sub "${AWS::StackName}-elastio-handler-for-aws-backup-wg"
-      RecursiveDeleteOption: true
-      State: ENABLED
-      WorkGroupConfiguration: 
-        ResultConfiguration: 
-          OutputLocation: !Sub 's3://${LogsBucketName}/elastio-logs/athena_results/'
             
 Outputs:
   StackName:

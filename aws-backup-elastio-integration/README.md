@@ -58,10 +58,8 @@ Elastio imports AWS Backups as globally deduplicated and compressed, resulting i
 4. Select "Upload Template File" and upload the YAML file.
 5. Enter the stack name "aws-backup-elastio-integration"
 6. Enter an S3 bucket name.  
-7. Enter the ARN of Lamdba "elastio-bg-jobs-service-aws-backup-rp-import"
+7. Enter the Tag name. Recovery points with this tag assigned will be scanned for vulnerabilities.
 8. Optionally use all defaults and follow the wizard to create the stack.
-
-NOTE: By using the Lambda provided in the AWS Backup Elastic integration, all backups will undergo scanning for all policies. In a future blog, instructions will be given on creating custom backup rules, which will involve modifying the Lambda that handles new AWS Backup events to exclude certain backups based on specific criteria.
 
   **Elastio_stack.yaml**
 ```
@@ -71,35 +69,35 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Reporter Configuration
+          default: Elastio Integration Configuration
         Parameters: 
             - LogsBucketName  
-            - ElastioImportLambdaARN            
+            - LambdaTriggerTag
     ParameterLabels:
       LogsBucketName:
         default: S3 Bucket for Elastio Logs and Data 
-      ElastioImportLambdaARN:
-        default: The ARN of Elastio Lambda for importing a RecoveryPoint
+      LambdaTriggerTag:
+        default: RecoveryPoint Tag to initiate Elastio Scan
 Parameters:
   LogsBucketName:
     Description: The S3 Bucket Name where the Job Logs and Reports are to be stored. 
     Type: String
-  ElastioImportLambdaARN:
-    Description: The ARN of Elastio Lambda for importing a RecoveryPoint
-    Type: String     
+  LambdaTriggerTag:
+    Description: The Tag in an AWS Backup RecoveryPoint that will initiate an Elastio Scan
+    Type: String
 Resources: 
 
   ProcessAWSBackupVaultStatusEventRuleForElastio: 
     Type: AWS::Events::Rule
     Properties: 
       Name: ProcessAWSBackupVaultStatusEventRuleForElastio
-      Description: "Rule to direct AWS Backup Events to Status Handler Lambda"
+      Description: "Rule to direct AWS Backup Events to Elastio Status Handler Lambda"
       State: "ENABLED"
       EventPattern: 
         source:
           - 'aws.backup'
         detail-type:
-          - 'Backup Job State Change'
+          - 'Recovery Point State Change'
       Targets: 
         - Arn: !GetAtt
                   - ElastioStatusHandlerLambda
@@ -138,6 +136,9 @@ Resources:
           from botocore.exceptions import ClientError
           def lambda_handler(event, context):
             try:
+                LAMBDA_TRIGGER_TAG = os.environ.get('LambdaTriggerTag') 
+                if not LAMBDA_TRIGGER_TAG:
+                  LAMBDA_TRIGGER_TAG = 'ElastioScan'
                 print(f'Handling event : {event}')
                 if event.get('source') == 'elastio.iscan':
                     job_event_type = 'scan_results'
@@ -149,59 +150,52 @@ Resources:
                 elif event.get('source') == 'aws.backup':
                     event_detail = event.get('detail')                
                     job_event_state = event_detail.get('state')
+                    backup_vault_name = event_detail.get('backupVaultName')
+                    resources = event.get('resources')
+                    recovery_point_arn = None
+                    for resource in resources:
+                        if not ':backup-vault:' in resource:
+                            recovery_point_arn = resource                      
                     if not job_event_state:
                         # Hack
                         job_event_state = event_detail.get('status')
                     if job_event_state in ('COMPLETED'):
                         try:
-                            backupvault_name = event_detail.get('backupVaultName')
-                            job_id = event_detail.get('backupJobId')
                             backup_client = boto3.client('backup')
-                            try:
-                                # boto3 API  /services/backup.html#Backup.Client.describe_backup_job
-                                backup_info = backup_client.describe_backup_job(BackupJobId=job_id)
-                                if 'ResponseMetadata' in backup_info:
-                                    del backup_info['ResponseMetadata']
-                    
-                                print(f"backup_info : {backup_info}")      
-                            except botocore.exceptions.ClientError as e:
-                                    if e.response['Error']['Code'] == "ResourceNotFoundException":
-                                        print(f"Backup Job with ID : {job_id} not found")
-                                    else:
-                                        print(f"Error : {e} processing describe_backup_job")
-                    
-                            recovery_point_arn = backup_info['RecoveryPointArn']  
-                            
-                            elastio_status_eb = os.environ.get('ElastioStatusEB') 
-                            if not elastio_status_eb:
-                                elastio_status_eb = 'elastio-scan-results'
-                              
-                            elastio_lambda_arn = os.environ.get('ElastioImportLambdaARN') 
-                            if not elastio_lambda_arn:
-                                raise Exception('ElastioImportLambdaARN is missing!') 
-                              
-                            #invoke the lambda
-                            input_params = {
-                                              "aws_backup_vault": backupvault_name,
-                                              "aws_backup_rp_arn": recovery_point_arn,
-                                              "iscan": {
-                                                "ransomware": True,
-                                                "malware": True,
-                                                "event_bridge_bus": elastio_status_eb
-                                              }
-                                            }
-                            print(f'invoking {elastio_lambda_arn} with {input_params}')
-                            try:
-                                boto3.client('lambda').invoke(
-                                    FunctionName=elastio_lambda_arn,
-                                    InvocationType='Event',
-                                    Payload=json.dumps(input_params)
-                                )
-    
-                            except (ClientError, Exception):  # pylint: disable = W0703
-                                var = traceback.format_exc()
-                                print(f"Error {var} processing invoke")                         
-                            
+                            response = backup_client.list_tags(ResourceArn=recovery_point_arn)
+                            tag_list = response.get('Tags')
+                            for key in tag_list:
+                              if key.lower() == LAMBDA_TRIGGER_TAG.lower():
+                                  if tag_list[key].lower() in ['true', '1', 't', 'y','yes']:
+                                      elastio_status_eb = os.environ.get('ElastioStatusEB') 
+                                      if not elastio_status_eb:
+                                          elastio_status_eb = 'elastio-scan-results'
+                                        
+                                      elastio_lambda_arn = os.environ.get('ElastioImportLambdaARN') 
+                                      if not elastio_lambda_arn:
+                                          raise Exception('ElastioImportLambdaARN is missing!') 
+                                        
+                                      #invoke the lambda
+                                      input_params = {
+                                                        "aws_backup_vault": backup_vault_name,
+                                                        "aws_backup_rp_arn": recovery_point_arn,
+                                                        "iscan": {
+                                                          "ransomware": True,
+                                                          "malware": True,
+                                                          "event_bridge_bus": elastio_status_eb
+                                                        }
+                                                      }
+                                      print(f'invoking {elastio_lambda_arn} with {input_params}')
+                                      try:
+                                          boto3.client('lambda').invoke(
+                                              FunctionName=elastio_lambda_arn,
+                                              InvocationType='Event',
+                                              Payload=json.dumps(input_params)
+                                          )
+              
+                                      except (ClientError, Exception):  # pylint: disable = W0703
+                                          var = traceback.format_exc()
+                                          print(f"Error {var} processing invoke")                         
                         except Exception:
                             var = traceback.format_exc()
                             print(f"Error {var} in lambda_handler while handling elastio.iscan")
@@ -241,8 +235,8 @@ Resources:
         Variables:
           ElastioStatusEB : !Ref ElastioJobStatusEventBus 
           LogsBucketName: !Ref LogsBucketName
-          ElastioImportLambdaARN : !Ref ElastioImportLambdaARN
-
+          ElastioImportLambdaARN : !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-bg-jobs-service-aws-backup-rp-import"
+          LambdaTriggerTag: !Ref LambdaTriggerTag
   ElastioJobStatusEventBus:
     Type: AWS::Events::EventBus
     Properties:
@@ -295,11 +289,6 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: 'sts:AssumeRole'
-          - Effect: Allow
-            Principal:
-              Service: 'quicksight.amazonaws.com'
-            Action:
-            - 'sts:AssumeRole'              
       ManagedPolicyArns:
           - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
@@ -337,7 +326,8 @@ Resources:
               Statement:
               - Effect: Allow
                 Action:
-                - backup:DescribeBackupJob
+                - backup:ListTags
+                - ec2:DescribeTags
                 Resource: '*'                      
           - PolicyName: logStreamPermissions
             PolicyDocument:
@@ -348,31 +338,6 @@ Resources:
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
                 Resource: !Sub 'arn:${AWS::Partition}:logs:*:*:*'                        
-          - PolicyName: GlueAthenaPermissions
-            PolicyDocument:
-              Statement:
-              - Effect: Allow
-                Action:
-                  - athena:*
-                  - glue:*
-                Resource: '*'
-
-  ElastioStatusLogsDB:
-    Type: AWS::Glue::Database
-    Properties:
-      CatalogId: !Ref "AWS::AccountId"
-      DatabaseInput:
-        Description: ElastioStatusLogsDB
-        Name: elastio-logs-db
-  AthenaWorkgroup:
-    Type: AWS::Athena::WorkGroup
-    Properties: 
-      Name: !Sub "${AWS::StackName}-elastio-handler-for-aws-backup-wg"
-      RecursiveDeleteOption: true
-      State: ENABLED
-      WorkGroupConfiguration: 
-        ResultConfiguration: 
-          OutputLocation: !Sub 's3://${LogsBucketName}/elastio-logs/athena_results/'
             
 Outputs:
   StackName:
@@ -393,8 +358,10 @@ Elastio is deployed in the account that contains the AWS Backup Vault in which y
 ### Run Your First Backup and Scan
 
 1. From the AWS Backup console, go to Dashboard and select "Create on-demand backup".
-2. Select EC2 or EBS to backup and press "Create on-demand backup" button.
-3. The scan results artifacts will be available in the S3 bucket provided in the CloudFormation definition. The results are presented in JSON.
+2. Select EC2 or EBS to backup.
+3. Add Tag that was specified during CFN Stack creation. E.g. `scan` - tag name specified during stack creation; `scan:true` - tag assigned to backup.
+4. Press "Create on-demand backup" button.
+5. The scan results artifacts will be available in the S3 bucket provided in the CloudFormation definition. The results are presented in JSON.
 
 From the Elastio Tenant.
 1. Select Jobs

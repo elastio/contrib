@@ -1,0 +1,24 @@
+{
+  "name": "elastio-webhook-handler",
+  "version": "1.0.0",
+  "description": "Example handler of Elastio webhooks",
+  "main": "src/index.ts",
+  "author": "Serhii Vernydub <svernydub@elastio.com>",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build": "yarn run check && ./node_modules/esbuild/bin/esbuild src/index.ts --bundle --platform=node --target=node18.0 --format=esm > dist/index.mjs",
+    "check": "tsc src/index.ts -noEmit && yarn eslint ."
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.114",
+    "@types/node": "^18.16.0",
+    "@typescript-eslint/eslint-plugin": "^5.58.0",
+    "@typescript-eslint/parser": "^5.58.0",
+    "esbuild": "^0.17.17",
+    "eslint": "^8.38.0",
+    "eslint-plugin-security": "^1.7.1",
+    "typescript": "^5.0.4"
+  }
+}

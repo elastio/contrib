@@ -8,7 +8,7 @@ To deploy this Lambda function, run the following AWS CLI command in the account
 
 ```shell
 aws cloudformation deploy --template-file cleanup-elastio-ebs-vols.yaml \
-    --stack-name ElastioEBSVolumeCleanupStack \
+    --stack-name elastio-ebs-volume-cleanup-stack \
     --capabilities CAPABILITY_IAM \
     --region us-east-1 \
     --no-fail-on-empty-changeset \

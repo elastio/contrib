@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Resources:
+  EBSVolumeCleanupFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: EBSVolumeCleanupFunction
+      Description: 'A Lambda function to delete un-attached EBS volumes older than 24 hours with the elastio:resource tag'
+      Runtime: nodejs16.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      InlineCode: |
+        const AWS = require('aws-sdk');
+        const ec2 = new AWS.EC2();
+
+        const isVolumeOlderThan24Hours = (createTime) => {
+          const currentTime = new Date();
+          const volumeCreateTime = new Date(createTime);
+          const timeDifference = currentTime - volumeCreateTime;
+          const hoursDifference = timeDifference / (1000 * 60 * 60);
+          return hoursDifference > 24;
+        };
+
+        exports.handler = async (event) => {
+          try {
+            const { Volumes } = await ec2.describeVolumes({
+              Filters: [
+                {
+                  Name: 'status',
+                  Values: ['available']
+                },
+                {
+                  Name: 'tag:elastio:resource',
+                  Values: ['*']
+                }
+              ]
+            }).promise();
+
+            for (const volume of Volumes) {
+              if (isVolumeOlderThan24Hours(volume.CreateTime)) {
+                await ec2.deleteVolume({ VolumeId: volume.VolumeId }).promise();
+              }
+            }
+
+            return { statusCode: 200, body: JSON.stringify({ message: 'EBS volumes cleanup successful' }) };
+          } catch (error) {
+            console.error(error);
+            throw error;
+          }
+        };
+      Events:
+        Schedule1:
+          Type: Schedule
+          Properties:
+            Schedule: 'rate(1 hour)'
+
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: LambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: EC2EBSVolumePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ec2:DescribeVolumes'
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - 'ec2:DeleteVolume'
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    'aws:ResourceTag/elastio:resource': '*'
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: 'arn:aws:logs:*:*:*'
+
+  EBSVolumeCleanupLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: '/aws/lambda/EBSVolumeCleanupFunction'
+      RetentionInDays: 7
+

@@ -81,7 +81,7 @@ Resources:
                   - 'ec2:DeleteVolume'
                 Resource: '*'
                 Condition:
-                  StringEquals:
+                  StringLike:
                     'aws:ResourceTag/elastio:resource': '*'
               - Effect: Allow
                 Action:

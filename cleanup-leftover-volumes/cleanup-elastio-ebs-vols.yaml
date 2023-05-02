@@ -23,6 +23,7 @@ Resources:
 
         exports.handler = async (event) => {
           try {
+            console.log("Getting list of unattached EBS volumes with elastio:resource tag");
             const { Volumes } = await ec2.describeVolumes({
               Filters: [
                 {
@@ -38,9 +39,11 @@ Resources:
 
             for (const volume of Volumes) {
               if (isVolumeOlderThan24Hours(volume.CreateTime)) {
-                console.log('Deleting unattached Elastio EBS volume ${volume.VolumeId}  older than 24 hours');
+                console.log("Deleting unattached Elastio EBS volume ${volume.VolumeId}  older than 24 hours");
                 await ec2.deleteVolume({ VolumeId: volume.VolumeId }).promise();
                 console.log("EBS volume ${volume.VolumeId} deleted");
+              } else {
+                console.log("EBS volume ${volume.VolumeId} is not old enough; skipping it");
               }
             }
 

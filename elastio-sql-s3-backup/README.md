@@ -1,4 +1,4 @@
-This article describes the procedure of backup and restore Microsoft SQL server database. If your database hosted in Amazon RDS see [Amazon RDS SQL Server](https://github.com/elastio/contrib/edit/MSSQL/elastio-sql-backup-ssstar-stream/README.md#amazon-rds-sql-server), if you have self hosted database see [self hosted SQL Server](https://github.com/elastio/contrib/edit/MSSQL/elastio-sql-backup-ssstar-stream/README.md#self-hosted-sql-server).
+This article describes the procedure of backup and restore Microsoft SQL server database. If your database hosted in Amazon RDS see [Amazon RDS SQL Server](https://github.com/elastio/contrib/blob/master/elastio-sql-s3-backup/README.md#amazon-rds-sql-server), if you have self hosted database see [self hosted SQL Server](https://github.com/elastio/contrib/blob/master/elastio-sql-s3-backup/README.md#self-hosted-sql-server).
 
 
 # Amazon RDS SQL Server

@@ -8,8 +8,6 @@ const ec2 = new EC2Client({});
 /**
  * A handler that is invoked periodically based on an AWS Sheduler shedule
  * and cleans up EBS snapshots that were already imported to Elastio.
- *
- * @param {AWS.CloudWatchEvent.Event} event
  */
 export async function handler() {
     const paginator = paginateDescribeSnapshots(

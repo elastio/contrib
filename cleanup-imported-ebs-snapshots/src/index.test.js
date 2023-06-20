@@ -53,7 +53,7 @@ test('filterSnapshotsToDelete', () => {
     const snaps = [8, 8, 9, 9, 10, 10, 10, 7];
     expect(deletedSnapshots(snaps)).toBeUndefined();
 
-    snaps.push(5);
-    expect(deletedSnapshots(snaps)).toStrictEqual([5]);
+    snaps.push(6);
+    expect(deletedSnapshots(snaps)).toStrictEqual([6]);
   });
 });

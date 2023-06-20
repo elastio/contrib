@@ -48,7 +48,7 @@ export async function handler() {
 function getEnv(name: string): string {
     const value = process.env[name];
     if (value == null) {
-        throw new Error(`DELETE_BY_TAG_KEY is not set`);
+        throw new Error(`${name} environment variable is not set`);
     }
     return value;
 }

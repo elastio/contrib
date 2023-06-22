@@ -1,5 +1,5 @@
 This article provides a comprehensive guide on the backup and restore procedure for snapshots of EKS persistent storage created by Velero. 
-Elastio, a powerful tool, efficiently reduces storage costs on AWS by effectively backing up and compressing data.
+Elastio efficiently reduces storage costs on AWS by effectively backing up and compressing data, while also providing enhanced protection against malware and ransomware threats.
 
 ## Requirements
 - AWS CLI

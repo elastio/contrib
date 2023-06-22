@@ -11,10 +11,10 @@ Before getting started, ensure that you have a Linux instance with Elastio and A
 
 ### Backup procedure
 
-##Backup via Elastio Tenant
+## Backup via Elastio Tenant
 TODO: Add description here when functionality will be implemented on blue stack.
 
-##Backup via Elastio CLI
+## Backup via Elastio CLI
 To backup all snapshots associated with the EBS volume, simply execute the following command. Optionally you can include the `--iscan` parameter to enable vulnerability scanning for the backups.
 
 ```

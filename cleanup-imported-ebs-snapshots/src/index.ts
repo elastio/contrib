@@ -190,7 +190,7 @@ export class CleanupContext {
             // Sort in ascending order by the start time (oldest snapshots first)
             toDelete.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
 
-            // Find the first snapshot that is within `KEEP_SNAPSHOTS` time threshold
+            // Find the first snapshot that is within the max age time threshold
             const firstKeptByTime = toDelete.findIndex(snapshot => {
                 const snapshotAge = this.options.now.getTime() - snapshot.startTime.getTime();
                 const snapshotAgeInDays = snapshotAge / (1000 * 60 * 60 * 24);

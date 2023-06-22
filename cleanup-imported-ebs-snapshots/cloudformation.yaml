@@ -1,12 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Parameters:
-  DeleteByTagKey:
-    Type: String
-    Default: elastio:imported-to-rp
-    Description: >
-      The name of the tag to delete by. That tag must have a value assigned to it.
-      The default tag elastio:imported-to-rp always contains the Elastio RP ID as the value.
   KeepMaxAgeInDays:
     Type: Number
     Default: '7'
@@ -81,7 +75,7 @@ Resources:
 
       Environment:
         Variables:
-          DELETE_BY_TAG_KEY: !Ref DeleteByTagKey
+          DELETE_BY_TAG_KEY: elastio:imported-to-rp
           KEEP_MAX_AGE_IN_DAYS: !Ref KeepMaxAgeInDays
           KEEP_MIN_AMOUNT: !Ref KeepMinAmount
 
@@ -223,7 +217,7 @@ Resources:
                     }
                     // Sort in ascending order by the start time (oldest snapshots first)
                     toDelete.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
-                    // Find the first snapshot that is within `KEEP_SNAPSHOTS` time threshold
+                    // Find the first snapshot that is within the max age time threshold
                     const firstKeptByTime = toDelete.findIndex(snapshot => {
                         const snapshotAge = this.options.now.getTime() - snapshot.startTime.getTime();
                         const snapshotAgeInDays = snapshotAge / (1000 * 60 * 60 * 24);

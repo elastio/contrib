@@ -13,7 +13,7 @@ This repository provides a self-contained [CloudFormation stack template file](.
 
 The source code for the lambda function resides inside of `src/index.ts` file. The resulting code was compiled with the TypeScript compiler and inserted into the cloudformation template making it possible to deploy that template with a single AWS command. You may use the [`deploy.sh`](./deploy.sh) script to do the deployment via the AWS CLI.
 
-The CloudFormation stack has several input parameters all set to default values to configure the tag, the maximum age, and the minimum number of snapshots to retain. These parameters are used to filter snapshots for deletion. For more details see the `cloudformation.json` template's `Parameters` section or deploy it via UI, where the parameters and their descriptions will be rendered.
+The CloudFormation stack has several input parameters all set to default values to configure, the maximum age, and the minimum number of snapshots to retain. These parameters are used to filter snapshots for deletion. For more details see the `cloudformation.json` template's `Parameters` section or deploy it via UI, where the parameters and their descriptions will be rendered.
 
 If you need to do changes to the code of the lambda. See the section below.
 

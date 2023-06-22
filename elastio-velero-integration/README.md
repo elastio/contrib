@@ -24,7 +24,7 @@ To create a backup policy that imports all snapshots corresponding to desired EB
 8. Configure additional options for the policy like on the screenshot below:
 ![image](https://github.com/elastio/contrib/assets/81738703/3f3e0103-806e-435e-870c-79b98caf5748)
 9. Save the policy configuration.
-10. 
+   
 Once the policy is created, Elastio will automatically import all the snapshots corresponding to the specified EBS volumes according to the defined schedule.
 
 ### Backup via Elastio CLI

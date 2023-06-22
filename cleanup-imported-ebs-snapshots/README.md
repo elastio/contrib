@@ -5,7 +5,7 @@ Elastio has a feature to import AWS EBS snapshots of your volumes into recovery 
 
 Elastio doesn't take responsibility for deleting the original EBS snapshots thus having a lower level of privileges required for its operation. Elastio, however, sets a tag named `elastio:imported-to-rp` when it is done with importing the EBS snapshot. The value of that tag is the ID of the recovery point the snapshot was imported as. This tag may be used for any purpose, including garbage collection.
 
-To solve the problem of cleaning up the imported EBS snapshots you use may your own solution for this, or the one recommended in this article described below.
+To solve the problem of cleaning up the imported EBS snapshots you may use your own solution for this, or the one recommended in this article described below.
 
 ## Garbage collection solution
 
@@ -13,7 +13,7 @@ This repository provides a self-contained [CloudFormation stack template file](.
 
 The source code for the lambda function resides inside of `src/index.ts` file. The resulting code was compiled with the TypeScript compiler and inserted into the cloudformation template making it possible to deploy that template with a single AWS command. You may use the [`deploy.sh`](./deploy.sh) script to do the deployment via the AWS CLI.
 
-The CloudFormation stack has several input parameters all set to default values to configure, the maximum age, and the minimum number of snapshots to retain. These parameters are used to filter snapshots for deletion. For more details see the `cloudformation.json` template's `Parameters` section or deploy it via UI, where the parameters and their descriptions will be rendered.
+The CloudFormation stack has several input parameters all set to default values to configure the maximum age, and the minimum number of snapshots to retain. These parameters are used to filter snapshots for deletion. For more details see the `cloudformation.json` template's `Parameters` section or deploy it via UI, where the parameters and their descriptions will be rendered.
 
 If you need to do changes to the code of the lambda. See the section below.
 
@@ -23,7 +23,7 @@ This section will be useful if you need to make changes to the code of the lambd
 
 The source code of the lambda is written in TypeScript in a single file `src/index.ts`. It is specifically all in one file to make it simple to paste it into the Cloudformation template afterwards.
 
-Because the source code for the lambda function is written in a separate TypeScript there is a build step. First of all, install the dependencies. You need to do it only once.
+Because the source code for the lambda function is written in a separate TypeScript file there is a build step. First of all, install the dependencies. You need to do it only once.
 
 ```bash
 npm install

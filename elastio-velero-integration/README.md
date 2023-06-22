@@ -91,4 +91,4 @@ aws s3 cp ./$veleroBackupName-volumesnapshots.json.gz s3://$veleroS3Bucket/backu
 rm $veleroBackupName-volumesnapshots.json.gz 
 ```
 
-Proceed with the Velero restore process as you normally would.
+Wait till snapshot creation is completed and proceed with the Velero restore process as you normally would.

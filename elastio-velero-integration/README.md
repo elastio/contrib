@@ -30,7 +30,7 @@ To verify that the desired backup snapshot has been imported by Elastio and remo
 3. Locate and click on the EBS volume ID in the list.
 4. In the opened backups list, identify the desired backup by checking the recovery points tags.
 
-TODO: Add screenshot here.
+![image](https://github.com/elastio/contrib/assets/81738703/7a1eea5d-c5b3-4bad-a196-f0f22724feb3)
 
 Copy recovery point ID and run the following command to restore EBS volume.
 

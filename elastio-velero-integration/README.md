@@ -70,7 +70,7 @@ volumeTags=$(aws ec2 describe-volumes --volume-ids $volumeID | jq ".Volumes[0].T
 Create a snapshot of this volume and assigned the same tags to it.
 
 ```
-snapshotID=$(aws ec2 create-snapshot --volume-id $volumeID --tag-specifications "ResourceType=snapshot,Tags=$tags" --query "SnapshotId" --output text)
+snapshotID=$(aws ec2 create-snapshot --volume-id $volumeID --tag-specifications "ResourceType=snapshot,Tags=$volumeTags" --query "SnapshotId" --output text)
 ```
 
 Modify the Velero backup description with new snapshot ID.

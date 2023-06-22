@@ -1,0 +1,19 @@
+{
+  "name": "elastio-cleanup-imported-ebs-snapshots-handler",
+  "version": "1.0.0",
+  "description": "Example scheduler lambda function to cleanup EBS snapshots imported into Elastio",
+  "main": "src/index.ts",
+  "author": "Vitalii Kryvenko <vkryvenko@elastio.com>",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-ec2": "^3.353.0",
+    "@types/node": "^18.16.0",
+    "jest": "^29.5.0",
+    "typescript": "^5.1.3"
+  }
+}

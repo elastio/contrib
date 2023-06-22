@@ -100,4 +100,3 @@ Resources:
     Properties:
       LogGroupName: '/aws/lambda/EBSVolumeCleanupFunction'
       RetentionInDays: 7
-

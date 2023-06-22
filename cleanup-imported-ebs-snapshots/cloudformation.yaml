@@ -1,0 +1,251 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Parameters:
+  KeepMaxAgeInDays:
+    Type: Number
+    Default: '7'
+    Description: >
+      The maximum age of snapshots to keep in days.
+      If a snapshot is older than this value, it will be deleted unless there
+      it fits into {KeepMinAmount} of latest snapshots.
+
+  KeepMinAmount:
+    Type: Number
+    Default: '7'
+    Description: >
+      The minimum amount of snapshots to keep for each volume even if they are older than {KeepMaxAgeInDays}.
+      If there are less than this amount of snapshots for a volume, none of them will be deleted.
+Resources:
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: [lambda.amazonaws.com] }
+            Action: [sts:AssumeRole]
+      Policies:
+        - PolicyName: EBSSnashotsPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ec2:DescribeSnapshots]
+                Resource: "*"
+              - Effect: Allow
+                Action: [ec2:DeleteSnapshot]
+                Resource: "*"
+                Condition:
+                  StringLike:
+                    aws:ResourceTag/elastio:imported-to-rp: "*"
+              - Effect: Allow
+                # We don't give the lambda a permission to create log groups
+                # because we pre-create the log group ourselves
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: arn:aws:logs:*:*:*
+
+  # The default log group that AWS Lambda creates has retention disabled.
+  # We don't want to store logs indefinitely, so we create a custom log group with
+  # retention enabled.
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/elastio-cleanup-imported-ebs-snapshots
+      # This lambda does destructive operations, so we want to keep the logs for a long time
+      # to be safe and to be able to debug any issues if they happen.
+      RetentionInDays: 180
+
+  Lambda:
+    Type: AWS::Serverless::Function
+    # We want to create a custom log group with retention enabled first,
+    # and only after that deploy the lambda.
+    DependsOn: LambdaLogGroup
+    Properties:
+      FunctionName: elastio-cleanup-imported-ebs-snapshots
+      Description: "A Lambda function to delete EBS snapshots tagged with elastio:imported-to-rp"
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Events:
+        Schedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: rate(1 hour)
+
+      Environment:
+        Variables:
+          DELETE_BY_TAG_KEY: elastio:imported-to-rp
+          KEEP_MAX_AGE_IN_DAYS: !Ref KeepMaxAgeInDays
+          KEEP_MIN_AMOUNT: !Ref KeepMinAmount
+
+      # Change the code if the lambda in the `src/index.ts` file and then run `npm run build`.
+      # After that, copy the content of the `dist/index.js` file and paste it here.
+      InlineCode: |
+        "use strict";
+        Object.defineProperty(exports, "__esModule", { value: true });
+        exports.CleanupContext = exports.handler = void 0;
+        const client_ec2_1 = require("@aws-sdk/client-ec2");
+        // This volume ID can appear in real EBS snapshots when the snapshot was
+        // copied from an other snapshot. We will skip such snapshots, because
+        // we don't know what the original volume ID was, and can't decide if
+        // there will be enough snapshots for that volume if we delete some of them.
+        const BROKEN_VOLUME_ID = 'vol-ffffffff';
+        const ec2 = new client_ec2_1.EC2Client({});
+        /**
+        * A handler that is invoked periodically based on an AWS Scheduler schedule
+        * and cleans up EBS snapshots that were already imported to Elastio.
+        */
+        async function handler() {
+            const now = new Date();
+            console.log(`Starting the cleanup relative to the current timestamp ${now.toISOString()}`);
+            const options = {
+                deleteByTagKey: getEnv('DELETE_BY_TAG_KEY'),
+                keepMinAmount: Number(getEnv('KEEP_MIN_AMOUNT')),
+                keepMaxAgeInDays: Number(getEnv('KEEP_MAX_AGE_IN_DAYS')),
+            };
+            const cleanup = await CleanupContext.discoverSnapshots({ now, ...options });
+            const considered = cleanup.total();
+            if (considered.snapshots === 0) {
+                console.log(`Nothing to do. Exiting.`);
+                return;
+            }
+            console.log(`Discovered ${considered.toString()} considered for cleanup`);
+            cleanup.filterSnapshotsToDelete();
+            const filtered = cleanup.total();
+            console.log(`Planning to delete ${filtered.toString()}`);
+            await cleanup.deleteSnapshots();
+            console.log(`Done processing ${filtered.toString()}`);
+        }
+        exports.handler = handler;
+        function getEnv(name) {
+            const value = process.env[name];
+            if (value == null) {
+                throw new Error(`${name} environment variable is not set`);
+            }
+            return value;
+        }
+        class CleanupTotal {
+            volumes;
+            snapshots;
+            constructor(volumes, snapshots) {
+                this.volumes = volumes;
+                this.snapshots = snapshots;
+            }
+            toString() {
+                return `${this.snapshots} snapshots for ${this.volumes} volumes`;
+            }
+        }
+        class CleanupContext {
+            options;
+            snapshots;
+            constructor(options, snapshots) {
+                this.options = options;
+                this.snapshots = snapshots;
+            }
+            static async discoverSnapshots(options) {
+                const paginator = (0, client_ec2_1.paginateDescribeSnapshots)({
+                    client: ec2,
+                    pageSize: 1000,
+                }, {
+                    OwnerIds: ['self'],
+                    Filters: [{ Name: 'tag-key', Values: [options.deleteByTagKey] }]
+                });
+                let snapshots = new Map();
+                for await (const page of paginator) {
+                    for (const snapshot of page.Snapshots ?? []) {
+                        if (snapshot.SnapshotId == null ||
+                            snapshot.StartTime == null ||
+                            snapshot.VolumeId == null ||
+                            snapshot.State == null) {
+                            console.error(`Skipping a snapshot without some of the required fields`, snapshot);
+                            continue;
+                        }
+                        if (snapshot.VolumeId == BROKEN_VOLUME_ID) {
+                            console.error(`Skipping a snapshot with the broken volume ID (${snapshot.VolumeId}). ` +
+                                `It's possible this snapshot was copied from an other snapshot. ` +
+                                `We don't support such snapshots.`, snapshot);
+                            continue;
+                        }
+                        const tag = snapshot.Tags?.find(tag => tag.Key === options.deleteByTagKey);
+                        if (tag == null) {
+                            // It should be a bug if we get here.
+                            // We must filter by this tag in the DescribeSnapshots query.
+                            console.error(`Found a snapshot without the tag '${options.deleteByTagKey}'. Skipping it.`, snapshot);
+                            continue;
+                        }
+                        if (tag.Value == null) {
+                            console.error(`Found a snapshot with the tag '${options.deleteByTagKey}' ` +
+                                `but without the value. Skipping it.`, snapshot);
+                            continue;
+                        }
+                        if (snapshot.State !== 'completed') {
+                            console.error(`Found a snapshot with the tag '${options.deleteByTagKey}' ` +
+                                `but with the state '${snapshot.State}'. Skipping it.`, snapshot);
+                            continue;
+                        }
+                        const newSnapshot = {
+                            snapshotId: snapshot.SnapshotId,
+                            startTime: snapshot.StartTime,
+                            tagValue: tag.Value,
+                        };
+                        const volumeSnapshots = snapshots.get(snapshot.VolumeId);
+                        if (volumeSnapshots == null) {
+                            snapshots.set(snapshot.VolumeId, [newSnapshot]);
+                            continue;
+                        }
+                        volumeSnapshots.push(newSnapshot);
+                    }
+                }
+                return new CleanupContext(options, snapshots);
+            }
+            total() {
+                const volumes = this.snapshots.size;
+                const snapshots = [...this.snapshots.values()]
+                    .reduce((acc, snapshots) => acc + snapshots.length, 0);
+                return new CleanupTotal(volumes, snapshots);
+            }
+            /**
+            * Retain only snapshots that need to be deleted
+            */
+            filterSnapshotsToDelete() {
+                const toDeleteMap = new Map();
+                for (const [volumeId, toDelete] of this.snapshots) {
+                    if (toDelete.length <= this.options.keepMinAmount) {
+                        // We don't have enough snapshots to delete any of them.
+                        continue;
+                    }
+                    // Sort in ascending order by the start time (oldest snapshots first)
+                    toDelete.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+                    // Find the first snapshot that is within the max age time threshold
+                    const firstKeptByTime = toDelete.findIndex(snapshot => {
+                        const snapshotAge = this.options.now.getTime() - snapshot.startTime.getTime();
+                        const snapshotAgeInDays = snapshotAge / (1000 * 60 * 60 * 24);
+                        return snapshotAgeInDays <= this.options.keepMaxAgeInDays;
+                    });
+                    let firstKept = toDelete.length - this.options.keepMinAmount;
+                    if (firstKeptByTime >= 0 && firstKeptByTime < firstKept) {
+                        firstKept = firstKeptByTime;
+                    }
+                    if (firstKept === 0) {
+                        continue;
+                    }
+                    toDeleteMap.set(volumeId, toDelete.slice(0, firstKept));
+                }
+                this.snapshots = toDeleteMap;
+            }
+            async deleteSnapshots() {
+                for (const [volumeId, snapshotsToDelete] of this.snapshots) {
+                    const promises = snapshotsToDelete.map(async (snapshot) => {
+                        const { snapshotId, tagValue, startTime } = snapshot;
+                        console.log(`Deleting the EBS snapshot ` +
+                            `(${this.options.deleteByTagKey}=${tagValue}) ${snapshotId} ` +
+                            `created at ${startTime.toISOString()} for the volume ${volumeId}`);
+                        await ec2.send(new client_ec2_1.DeleteSnapshotCommand({ SnapshotId: snapshotId }));
+                    });
+                    await Promise.all(promises);
+                    console.log(`Deleted ${snapshotsToDelete.length} snapshots for the volume ${volumeId}`);
+                }
+            }
+        }
+        exports.CleanupContext = CleanupContext;

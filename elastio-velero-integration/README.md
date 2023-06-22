@@ -12,7 +12,20 @@ Before getting started, ensure that you have a Linux instance with Elastio and A
 ## Backup procedure
 
 ### Backup via Elastio Tenant
-TODO: Add description here when functionality will be implemented on blue stack.
+To create a backup policy that imports all snapshots corresponding to desired EBS volumes, you can follow these steps:
+
+1. Access your Elastio Tenant.
+2. Navigate to the Policies section.
+3. Click on "New Policy" to start creating a new policy.
+4. Provide a meaningful name for the policy.
+5. Specify the appropriate schedule for the backups (e.g., daily, weekly, etc.) based on your requirements.
+6. Select Integrity Scan options if required.
+7. Add the desired EBS volumes that you want to include in the backups.
+8. Configure additional options for the policy like on the screenshot below:
+![image](https://github.com/elastio/contrib/assets/81738703/79c5da7f-59c6-4dc2-9f41-ad7d17c3e7f2)
+9. Save the policy configuration.
+10. 
+Once the policy is created, Elastio will automatically import all the snapshots corresponding to the specified EBS volumes according to the defined schedule.
 
 ### Backup via Elastio CLI
 To backup all snapshots associated with the EBS volume, simply execute the following command. Optionally you can include the `--iscan` parameter to enable vulnerability scanning for the backups.

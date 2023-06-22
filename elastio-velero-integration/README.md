@@ -1,29 +1,29 @@
 This article provides a comprehensive guide on the backup and restore procedure for snapshots of EKS persistent storage created by Velero. 
 Elastio, a powerful tool, efficiently reduces storage costs on AWS by effectively backing up and compressing data.
 
-### Requirements
+## Requirements
 - AWS CLI
 - Elastio CLI
 - jq tool
 
-### Prerequisites
+## Prerequisites
 Before getting started, ensure that you have a Linux instance with Elastio and AWS CLI connected to your AWS account with Velero backups configured. Additionally, make sure to install the `jq` tool.
 
-### Backup procedure
+## Backup procedure
 
-## Backup via Elastio Tenant
+### Backup via Elastio Tenant
 TODO: Add description here when functionality will be implemented on blue stack.
 
-## Backup via Elastio CLI
+### Backup via Elastio CLI
 To backup all snapshots associated with the EBS volume, simply execute the following command. Optionally you can include the `--iscan` parameter to enable vulnerability scanning for the backups.
 
 ```
 elastio ebs import-snapshot --volume-id [Volume-id] --iscan
 ```
 
-### TODO: Add lambda desctiption for snapshots removal
+## TODO: Add lambda desctiption for snapshots removal
 
-### Restore procedure
+## Restore procedure
 To verify that the desired backup snapshot has been imported by Elastio and removed from AWS, follow these steps:
 1. Access your Elastio Tenant.
 2. Navigate to the Assets list.

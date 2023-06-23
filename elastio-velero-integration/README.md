@@ -34,7 +34,8 @@ To backup all snapshots associated with the EBS volume, simply execute the follo
 elastio ebs import-snapshot --volume-id [Volume-id] --iscan
 ```
 
-## TODO: Add lambda desctiption for snapshots removal
+## Lambda to cleanup EBS Snapshots imported to Elastio
+To set up a Lambda function for cleaning up snapshots imported by Elastio, please refer to the following [article](https://github.com/elastio/contrib/tree/master/cleanup-imported-ebs-snapshots).
 
 ## Restore procedure
 To verify that the desired backup snapshot has been imported by Elastio and removed from AWS, follow these steps:

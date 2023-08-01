@@ -1,11 +1,39 @@
-tags='{"Tags":[{"Key": "name1","Value": "value2"},{"Key": "name2","Value": "value2"}]}'
+#!/bin/bash
+
+#usage info
+usage(){
+  echo "Usage:"
+  echo "  $0 -t tag"
+  echo
+  echo "Example:"
+  echo "  $0 -t tag1=value1 -t tag2=value2"
+  echo
+  exit
+}
+
+#parse options and arguments
+while getopts "t:" option; do
+  case $option in
+    "t")
+      arguments+=($(echo '{"Key":"'${OPTARG%=*}'","Value":"'${OPTARG#*=}'"}'))
+      ;;
+    *)
+      usage
+      ;;
+  esac
+done
+
+#no options were provided or there was a mistake
+if [ "$OPTIND" -eq "1" ] || [ "$OPTIND" -le "$#" ]; then
+  usage
+fi
 
 
 ###add custom tags to ASGs
 
 customTagsASG=""
 
-for element in $(echo $tags | jq ".Tags[]" -c)
+for element in "${arguments[@]}"
 do
 
  customTag=$(echo "Key=$(echo $element | jq ".Key" -r),Value=$(echo $element | jq ".Value" -r)")
@@ -39,7 +67,7 @@ do
  if [[ "$launchTemplateData" == *"elastio"* ]]; then 
 
   #add custom tags to the existent array
-  for element in $(echo $tags | jq ".Tags[]" -c)
+  for element in "${arguments[@]}"
   do
 
    launchTemplateData=$(echo $launchTemplateData | jq ".TagSpecifications[0].Tags[.TagSpecifications[0].Tags | length] |= .+ $element" -c)

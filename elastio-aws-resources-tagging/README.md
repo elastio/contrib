@@ -13,20 +13,8 @@ Alternatively, you can use a cloud shell console directly within the AWS account
 
 Create a new `script.sh` file and copy the content of the script to the file.
 
-Replace keys and values with your desired custom tags:
-
-```
-tags='{"Tags":[{"Key": "name1","Value": "value2"},{"Key": "name2","Value": "value2"}]}'
-```
-
-If you need only one tag, remove the second element of the array, like in the example:
-
-```
-tags='{"Tags":[{"Key": "name1","Value": "value2"}]}'
-```
-
 Run `chmod +x script.sh` command to make file executable.
 
-Run the script `./script.sh`.
+Run the script `./script.sh -t tag1=value1 -t tag2=value2`.
 
-As a result, all ASGs and Launch templates which elastio owns will be tagged with appropriate tags.
+As a result, all Auto Scaling groups and Launch templates which elastio owns will be tagged with appropriate tags.

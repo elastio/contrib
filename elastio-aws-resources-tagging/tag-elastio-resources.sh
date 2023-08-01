@@ -44,7 +44,7 @@ do
 
   if [[ "$ASGID" == *"elastio"* ]]; then
 
-   customTagsASG+=$(echo "ResourceId=$ASGID,ResourceType=auto-scaling-group,$customTag,PropagateAtLaunch=false ")
+   customTagsASG+=$(echo "ResourceId=$ASGID,ResourceType=auto-scaling-group,$customTag,PropagateAtLaunch=True ")
 
   fi
 
@@ -62,7 +62,7 @@ for launchTemplateName in $(aws ec2 describe-launch-templates --query "LaunchTem
 do
 
  #get launchTemplates tags
- launchTemplateData=$(aws ec2 describe-launch-template-versions --launch-template-name $launchTemplateName --versions $Default --query "LaunchTemplateVersions[0].LaunchTemplateData.{TagSpecifications:TagSpecifications}")
+ launchTemplateData=$(aws ec2 describe-launch-template-versions --launch-template-name $launchTemplateName --versions '$Default' --query "LaunchTemplateVersions[0].LaunchTemplateData.{TagSpecifications:TagSpecifications}")
 
  if [[ "$launchTemplateData" == *"elastio"* ]]; then 
 
@@ -76,7 +76,8 @@ do
   done
 
   #create new launchTemplate version with custom tags
-  var=$(aws ec2 create-launch-template-version --launch-template-name $launchTemplateName --launch-template-data $(echo $launchTemplateData | jq "." -c))
+  var=$(aws ec2 create-launch-template-version --launch-template-name $launchTemplateName --launch-template-data $(echo $launchTemplateData | jq "." -c) --source-version \
+  $(aws ec2 describe-launch-templates --launch-template-name $launchTemplateName --query "LaunchTemplates[].LatestVersionNumber" --output text))
 
   #make new launchTemplate version default
   var=$(aws ec2 modify-launch-template --launch-template-name $launchTemplateName --default-version \

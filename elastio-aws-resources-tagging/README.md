@@ -9,12 +9,21 @@ OR
 
 Alternatively, you can use a cloud shell console directly within the AWS account where elastio is operational. 
 
-### Script usage
+### Usage
 
-Create a new `script.sh` file and copy the content of the script to the file.
+To download the script, run the following command:
+```
+curl https://raw.githubusercontent.com/elastio/contrib/master/elastio-aws-resources-tagging/tag-elastio-resources.sh -o tag-elastio-resources.sh
+```
 
-Run `chmod +x script.sh` command to make file executable.
+Next, make the file executable by running:
+```
+chmod +x tag-elastio-resources.sh
+```
 
-Run the script `./script.sh -t tag1=value1 -t tag2=value2`.
+Finally, execute the script with the desired tags:
+```
+./tag-elastio-resources.sh -t tag1=value1 -t tag2=value2
+```
 
-As a result, all Auto Scaling groups and Launch templates which elastio owns will be tagged with appropriate tags.
+As a result, all Auto Scaling groups and Launch templates owned by elastio will be tagged with the appropriate tags.

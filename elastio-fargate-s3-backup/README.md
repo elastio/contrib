@@ -14,13 +14,12 @@
 1. Go to [AWS Elastic Container Service Task definitions](https://console.aws.amazon.com/ecs/v2/task-definitions)
 2. Press Create new task definition
 3. Type ElastioS3Backup as a task definition family name
-4. Type Elastio-CLI as container name
-5. Paste `public.ecr.aws/elastio-dev/elastio-cli:latest` in container image URI
-6. Expand Docker configuration and paste `sh,-c` in Entry point and `elastio s3 backup --bucket <S3 Bucket Name>` in Command. Where `<S3 Bucket Name>` is a name of your bucket for backup.
-7. Press Next
-
-8. Select ElastioS3Backup as Task role
-9. Press Next and Create
+4. Select ElastioS3Backup as Task role
+5. Type Elastio-CLI as container name
+6. Paste `public.ecr.aws/elastio-dev/elastio-cli:latest` in container image URI
+7. Expand Docker configuration and paste `sh,-c` in Entry point and `elastio s3 backup --bucket <S3 Bucket Name>` in Command. Where `<S3 Bucket Name>` is a name of your bucket for backup.
+![image](https://github.com/elastio/contrib/assets/81738703/5251e7f1-ed76-48bd-96a6-a5f5dfa529a3)
+8. Press Next and Create
 
 ## Run S3 backup by Elastio and AWS Fargate
 

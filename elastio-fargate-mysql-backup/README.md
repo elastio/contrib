@@ -39,7 +39,7 @@ apt-get install default-mysql-client -y && \
 4. Select Launch type and select ElastioMySQLBackup for Task definition Family
 5. Press Create
 
-## Schedule S3 backup by Elastio and AWS Fargate
+## Schedule automatic MySQL backup with Elastio and AWS Fargate
 
 1. Go to [AWS Elastic Container Service](https://console.aws.amazon.com/ecs/v2/)
 2. Select an existing cluster or create new one

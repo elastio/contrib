@@ -6,7 +6,7 @@
 2. Press Create Role button
 3. Select Elastic Container Service Task under Elastic Container Service for AWS service trusted entity and press Next
 ![image](https://github.com/elastio/contrib/assets/81738703/0a7050a0-895b-4227-a609-40bb9c6acb24)
-4. Select ElastioBackupAdmin and AmazonS3ReadOnlyAccess permissions and press Next
+4. Select `ElastioBackupAdmin` and `AmazonS3ReadOnlyAccess` permissions and press Next
 5. Type ElastioS3BackupRole as a role name and press Create role
 
 ## Create ECS Task Definition

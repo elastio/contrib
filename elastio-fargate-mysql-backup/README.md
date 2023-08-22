@@ -21,7 +21,14 @@
 ```
 apt-get install default-mysql-client -y && mysqldump -h HOST -u USER -P PORT -p'PASSWORD' DATABASE | elastio stream backup --stream-name MySQL-Elastio-backup
 ```
-![image](https://github.com/elastio/contrib/assets/81738703/5251e7f1-ed76-48bd-96a6-a5f5dfa529a3)
+For example:
+```
+apt-get install default-mysql-client -y && \
+  mysqldump -h database-1.cobsthon7f1g.us-east-1.rds.amazonaws.com -u admin -P 3306 -p'MySQLPassword' DemoDB | \
+  elastio stream backup --stream-name mysql
+```
+![image](https://github.com/elastio/contrib/assets/81738703/83e9411c-2f9d-422b-adff-c76f851008a3)
+
 8. Press Create
 
 ## Run S3 backup by Elastio and AWS Fargate

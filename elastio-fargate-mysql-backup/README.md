@@ -13,19 +13,19 @@
 
 1. Go to [AWS Elastic Container Service Task definitions](https://console.aws.amazon.com/ecs/v2/task-definitions)
 2. Press Create new task definition
-3. Type ElastioMySQLBackup as a task definition family name
-4. Select ElastioMySQLBackupRole as Task role
+3. Type `ElastioMySQLBackup` as a task definition family name
+4. Select `ElastioMySQLBackupRole` as Task role
 5. Type Elastio-CLI as container name
 6. Paste `public.ecr.aws/elastio-dev/elastio-cli:latest` in container image URI
 7. Expand Docker configuration and paste `sh,-c` in Entry point and following comman in Command:
 ```
-apt-get install default-mysql-client -y && mysqldump -h HOST -u USER -P PORT -p'PASSWORD' DATABASE | elastio stream backup --stream-name MySQL-Elastio-backup
+apt-get install default-mysql-client -y && mysqldump -h HOST -u USER -P PORT -p'PASSWORD' DATABASE | elastio stream backup --stream-name MySQL-Daily-backup --hostname-override MySQL-hostname
 ```
 For example:
 ```
 apt-get install default-mysql-client -y && \
   mysqldump -h database-1.cobsthon7f1g.us-east-1.rds.amazonaws.com -u admin -P 3306 -p'MySQLPassword' DemoDB | \
-  elastio stream backup --stream-name MySQL-Daily-Backup
+  elastio stream backup --stream-name MySQL-Daily-Backup --hostname-override database-1.cobsthon7f1g.us-east-1.rds.amazonaws.com
 ```
 ![image](https://github.com/elastio/contrib/assets/81738703/2ee7ebd2-b060-448e-a53d-f0082d5929ae)
 
@@ -36,7 +36,7 @@ apt-get install default-mysql-client -y && \
 1. Go to [AWS Elastic Container Service](https://console.aws.amazon.com/ecs/v2/)
 2. Select an existing cluster or create new one
 3. Go to cluster tasks and press Run new task
-4. Select Launch type and select ElastioMySQLBackup for Task definition Family
+4. Select Launch type and select `ElastioMySQLBackup` for Task definition Family
 5. Press Create
 
 ## Schedule automatic MySQL backup with Elastio and AWS Fargate
@@ -45,5 +45,5 @@ apt-get install default-mysql-client -y && \
 2. Select an existing cluster or create new one
 3. Go to Scheduled tasks and press Create
 4. Specify Schedule rule name, Schedule, Target id
-5. Select FARGATE Launch type, ElastioMySQLBackup as Task Definition, VPC and Subnets
+5. Select FARGATE Launch type, `ElastioMySQLBackup` as Task Definition, VPC and Subnets
 6. Press Create

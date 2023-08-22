@@ -8,6 +8,18 @@
 ![image](https://github.com/elastio/contrib/assets/81738703/0a7050a0-895b-4227-a609-40bb9c6acb24)
 4. Select `ElastioBackupAdmin` permission and press Next
 5. Type `ElastioMySQLBackupRole` as a role name and press Create role
+6. Open `ElastioMySQLBackupRole` and select Create inline policy under Add permissions
+7. Select Secrets Manager and add `GetSecretValue` permission
+
+## Create secret in AWS Secrets Manager
+1. Go to [AWS Secrets Manager](https://console.aws.amazon.com/secretsmanager/listsecrets)
+2. Press Store a new secrete button
+3. Select `Credentials for Amazon RDS database` option
+4. Specify the username and password for MySQL
+5. Select the database from the list and press Next
+![image](https://github.com/elastio/contrib/assets/81738703/5157852f-86c3-425e-bcc7-8a0a2a832a21)
+6. Specify secret name, for example `MySQLBackupCreds` and press next
+7. Review the secret and press Store
 
 ## Create ECS Task Definition
 
@@ -19,14 +31,13 @@
 6. Paste `public.ecr.aws/elastio-dev/elastio-cli:latest` in container image URI
 7. Expand Docker configuration and paste `sh,-c` in Entry point and following comman in Command:
 ```
-apt-get install default-mysql-client -y && mysqldump -h HOST -u USER -P PORT -p'PASSWORD' DATABASE | elastio stream backup --stream-name MySQL-Daily-backup --hostname-override MySQL-hostname
+apt-get install awscli jq default-mysql-client -y && creds=$(aws secretsmanager get-secret-value --secret-id MySQLBackupCreds | jq ".SecretString | fromjson") && mysqldump -h $(echo $creds | jq -r ".host") -u $(echo $creds | jq -r ".username") -P $(echo $creds | jq -r ".port") -p"$(echo $creds | jq -r '.password')" DATABASE | elastio stream backup --stream-name MySQL-Daily-backup --hostname-override MySQL-hostname
 ```
-For example:
-```
-apt-get install default-mysql-client -y && \
-  mysqldump -h database-1.cobsthon7f1g.us-east-1.rds.amazonaws.com -u admin -P 3306 -p'MySQLPassword' DemoDB | \
-  elastio stream backup --stream-name MySQL-Daily-Backup --hostname-override database-1.cobsthon7f1g.us-east-1.rds.amazonaws.com
-```
+Where:
+ - MySQLBackupCreds - name of the secret which stores credentials for MySQL database
+ - DATABASE - name of the database for backup
+ - MySQL-Daily-backup and MySQL-hostname - stream and host names that will be displayed in the Eastio tenant
+
 ![image](https://github.com/elastio/contrib/assets/81738703/2ee7ebd2-b060-448e-a53d-f0082d5929ae)
 
 8. Press Create

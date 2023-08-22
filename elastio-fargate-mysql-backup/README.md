@@ -31,7 +31,7 @@ apt-get install default-mysql-client -y && \
 
 8. Press Create
 
-## Run S3 backup by Elastio and AWS Fargate
+## Run on-demand MySQL backup with Elastio and AWS Fargate
 
 1. Go to [AWS Elastic Container Service](https://console.aws.amazon.com/ecs/v2/)
 2. Select an existing cluster or create new one

@@ -25,9 +25,9 @@ For example:
 ```
 apt-get install default-mysql-client -y && \
   mysqldump -h database-1.cobsthon7f1g.us-east-1.rds.amazonaws.com -u admin -P 3306 -p'MySQLPassword' DemoDB | \
-  elastio stream backup --stream-name mysql
+  elastio stream backup --stream-name MySQL-Daily-Backup
 ```
-![image](https://github.com/elastio/contrib/assets/81738703/83e9411c-2f9d-422b-adff-c76f851008a3)
+![image](https://github.com/elastio/contrib/assets/81738703/2ee7ebd2-b060-448e-a53d-f0082d5929ae)
 
 8. Press Create
 

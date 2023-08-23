@@ -13,7 +13,7 @@
 
 ## Create secret in AWS Secrets Manager
 1. Go to [AWS Secrets Manager](https://console.aws.amazon.com/secretsmanager/listsecrets)
-2. Press Store a new secrete button
+2. Press Store a new secret button
 3. Select `Credentials for Amazon RDS database` option
 4. Specify the username and password for MySQL
 5. Select the database from the list and press Next

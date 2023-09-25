@@ -58,6 +58,7 @@ When restore is done set the following variables with the Velero backup name and
 ```
 export veleroBackupName=BackupName
 export veleroS3Bucket=BucketName
+export AWS_DEFAULT_REGION=AWSRegion
 ```
 Replace `BackupName` and `BucketName` with coresponding names.
 

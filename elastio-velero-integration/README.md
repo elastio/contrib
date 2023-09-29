@@ -40,10 +40,10 @@ To set up a Lambda function for cleaning up snapshots imported by Elastio, pleas
 ## Automated restore procedure
 `restore-snapshots-with-velero-backups.sh` script is designed to restore cleaned up snapshots from elastio vault.
 To restore snapshots you need provide following parameters:
--n Kubernetes namespace. To get the namespace name run `kubectl get namespaces`
--b Velero backup name. To get the backup name run `velero get backups`
--s S3 bucket for Velero backups. To get the bucket name run `velero backup-location get`
--r AWS region with velero and elastio.
+- -n Kubernetes namespace. To get the namespace name run `kubectl get namespaces`
+- -b Velero backup name. To get the backup name run `velero get backups`
+- -s S3 bucket for Velero backups. To get the bucket name run `velero backup-location get`
+- -r AWS region with velero and elastio.
 
 Usage example:
 ```

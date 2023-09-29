@@ -37,7 +37,20 @@ elastio ebs import-snapshot --volume-id [Volume-id] --iscan
 ## Lambda to cleanup EBS Snapshots imported to Elastio
 To set up a Lambda function for cleaning up snapshots imported by Elastio, please refer to the following [article](https://github.com/elastio/contrib/tree/master/cleanup-imported-ebs-snapshots).
 
-## Restore procedure
+## Automated restore procedure
+`restore-snapshots-with-velero-backups.sh` script is designed to restore cleaned up snapshots from elastio vault.
+To restore snapshots you need provide following parameters:
+-n Kubernetes namespace. To get the namespace name run `kubectl get namespaces`
+-b Velero backup name. To get the backup name run `velero get backups`
+-s S3 bucket for Velero backups. To get the bucket name run `velero backup-location get`
+-r AWS region with velero and elastio.
+
+Usage example:
+```
+restore-snapshots-with-velero-backups.sh -n default -b daily-backup-20230919070049 -s velerobackupsbucket001 -r us-east-1
+```
+
+## Manual restore procedure
 To verify that the desired backup snapshot has been imported by Elastio and removed from AWS, follow these steps:
 1. Access your Elastio Tenant.
 2. Navigate to the Assets list.

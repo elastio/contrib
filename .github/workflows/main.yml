@@ -31,7 +31,7 @@ jobs:
         uses: "aws-actions/configure-aws-credentials@v3"
         with:
           aws-region: "us-east-2"
-          role-to-assume: "${{ secrets.CI_AWS_ROLE_ARN}}"
+          role-to-assume: "arn:aws:iam::537513441174:role/Github-Actions-Contrib-OIDC-Role"
           special-characters-workaround: 'true'
       - name: Upload lambda and cfn to bucket
         if: "steps.changes.outputs.filechange == 'true'"

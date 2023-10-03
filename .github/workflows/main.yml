@@ -30,7 +30,7 @@ jobs:
         if: "steps.changes.outputs.filechange == 'true'"
         uses: "aws-actions/configure-aws-credentials@v3"
         with:
-          aws-region: "${{ secrets.CI_AWS_DEFAULT_REGION }}"
+          aws-region: "us-east-2"
           role-to-assume: "${{ secrets.CI_AWS_ROLE_ARN}}"
           special-characters-workaround: 'true'
       - name: Upload lambda and cfn to bucket
@@ -38,7 +38,7 @@ jobs:
         env:
           NAME: aws-backup-elastio-integration
           CFN_NAME: Elastio_stack.yaml
-          S3_BUCKET: "${{ secrets.CI_S3_BUCKET }}"
+          S3_BUCKET: "elastio-artifacts-us-east-2"
           S3_KEY: "contrib"
         run: |
           aws s3 cp ${NAME}/${CFN_NAME} s3://${S3_BUCKET}/${S3_KEY}/${CFN_NAME}

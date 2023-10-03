@@ -1,0 +1,48 @@
+name: master
+on:
+  push:
+    branches:
+      - master
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  cancel-in-progress: false
+  group: "${{ github.workflow }}-${{ github.ref }}"
+jobs:
+  upload-aws-backup-elastio-integration:
+    runs-on:
+      - ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: "actions/checkout@v3"
+        with:
+          fetch-depth: '30'
+          token: "${{ secrets.SECRET_TOKEN }}"
+      - name: Check if files were modified
+        id: changes
+        uses: "dorny/paths-filter@v2"
+        with:
+          filters: |
+            filechange:
+              - 'aws-backup-elastio-integration/**'
+      - name: Configure AWS credentials
+        if: "steps.changes.outputs.filechange == 'true'"
+        uses: "aws-actions/configure-aws-credentials@v3"
+        with:
+          aws-region: "us-east-2"
+          role-to-assume: "arn:aws:iam::537513441174:role/Github-Actions-Contrib-OIDC-Role"
+          special-characters-workaround: 'true'
+      - name: Upload lambda and cfn to bucket
+        if: "steps.changes.outputs.filechange == 'true'"
+        env:
+          NAME: aws-backup-elastio-integration
+          CFN_NAME: Elastio_stack.yaml
+          S3_BUCKET: "elastio-artifacts-us-east-2"
+          S3_KEY: "contrib"
+        run: |
+          aws s3 cp ${NAME}/${CFN_NAME} s3://${S3_BUCKET}/${S3_KEY}/${CFN_NAME}
+
+          cd ${NAME}
+          zip ${NAME}.zip lambda_handler.py
+          aws s3 cp ${NAME}.zip s3://${S3_BUCKET}/${S3_KEY}/${NAME}.zip

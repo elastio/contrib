@@ -172,7 +172,7 @@ aws s3 cp s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volum
 echo
 
 #upload a backup of config to s3
-aws s3 cp ./temp.json.gz s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volumesnapshots-original.json.gz
+aws s3 cp ./temp.json.gz s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volumesnapshots-original-$(date +%s).json.gz
 
 gzip -d temp.json.gz
 

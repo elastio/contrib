@@ -82,7 +82,7 @@ then
 fi
 
 #check if snapshots exist
-if [ ! -z "$(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName --query "Snapshots[].SnapshotId" --output text)" ];
+if [ ! -z "$(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Snapshots[].SnapshotId" --output text)" ];
 then
   echo
   echo "Nothing to do. Snapshots with velero backup $veleroBackupName are present in AWS:"
@@ -134,7 +134,7 @@ do
 done
 
 #create snapshots with velero tags
-for volumeID in $(aws ec2 describe-volumes --filters Name=tag:velero.io/backup,Values=$veleroBackupName --query "Volumes[].VolumeId" --output text)
+for volumeID in $(aws ec2 describe-volumes --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Volumes[].VolumeId" --output text)
 do
   volumeTags=$(aws ec2 describe-volumes --volume-ids $volumeID | jq ".Volumes[0].Tags" | sed -r 's/"+//g' | sed -r 's/: +/=/g')
   snapshotID=$(aws ec2 create-snapshot --volume-id $volumeID --tag-specifications "ResourceType=snapshot,Tags=$volumeTags" --query "SnapshotId" --output text)
@@ -146,7 +146,7 @@ echo
 echo $(date)": Creating EBS snapshots, the duration will depend on the data size."
 
 #wait snapshot creation finish and remove EBS
-for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName --query "Snapshots[].SnapshotId" --output text)
+for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Snapshots[].SnapshotId" --output text)
 do
   while [[ $(aws ec2 describe-snapshots --snapshot-ids $snapshotID --query "Snapshots[].State" --output text) != "completed" ]]
   do
@@ -158,7 +158,7 @@ done
 echo
 echo $(date)": Snapshots created:"
 s=0
-for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName --query "Snapshots[].SnapshotId" --output text)
+for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=default --query "Snapshots[].SnapshotId" --output text)
 do
   ((s++))
   echo $s. $snapshotID
@@ -181,9 +181,12 @@ declare -i v=0
 
 for volumeID in $(cat temp.json | jq .[].spec.providerVolumeID -r)
 do
-  snapshotID=$(aws ec2 describe-snapshots --filters Name=tag:elastio:restored-from-asset,Values=$volumeID Name=tag:velero.io/backup,Values=$veleroBackupName --query "Snapshots[].SnapshotId" --output text)
-  cat temp.json | jq -c --arg snapshotID $snapshotID --argjson v $v '.[$v].status.providerSnapshotID |= $snapshotID' > volumesnapshots.json
-  mv volumesnapshots.json temp.json
+  snapshotID=$(aws ec2 describe-snapshots --filters Name=tag:elastio:restored-from-asset,Values=$volumeID Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Snapshots[].SnapshotId" --output text)
+  if [ ! -z "$snapshotID" ];
+  then
+    cat temp.json | jq -c --arg snapshotID $snapshotID --argjson v $v '.[$v].status.providerSnapshotID |= $snapshotID' > volumesnapshots.json
+    mv volumesnapshots.json temp.json
+  fi
   ((v++))
 done
 

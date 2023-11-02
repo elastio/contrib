@@ -6,7 +6,7 @@ do
   echo "$vpcID:"
   for subnetID in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcID" --query "Subnets[*].SubnetId" --output text)
     do
-      instanceID=$(aws ec2 run-instances --image-id $ami --instance-type t2.nano --subnet-id $subnetID \
+      instanceID=$(aws ec2 run-instances --image-id $ami --instance-type t2.micro --subnet-id $subnetID \
         --associate-public-ip-address --query "Instances[].InstanceId" --output text --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=elastio-reachability-analyzer}]')
 
       while [[ $(aws ec2 describe-instances --instance-ids $instanceID --query "Reservations[].Instances[].State.Name" --output text) != "running" ]]

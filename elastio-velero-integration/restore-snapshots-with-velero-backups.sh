@@ -85,9 +85,9 @@ fi
 if [ ! -z "$(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Snapshots[].SnapshotId" --output text)" ];
 then
   echo
-  echo "Nothing to do. Snapshots with velero backup $veleroBackupName are present in AWS:"
+  echo "Nothing to do. Snapshots with velero backup $veleroBackupName and namespace $namespaceName are present in AWS:"
   s=0
-  for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName --query "Snapshots[].SnapshotId" --output text)
+  for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Snapshots[].SnapshotId" --output text)
   do
     ((s++))
     echo $s. $snapshotID

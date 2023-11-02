@@ -6,33 +6,34 @@ do
   echo "$vpcID:"
   for subnetID in $(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcID" --query "Subnets[*].SubnetId" --output text)
     do
-	  instanceID=$(aws ec2 run-instances --image-id $ami --instance-type t2.nano --subnet-id $subnetID \
-	    --associate-public-ip-address --query "Instances[].InstanceId" --output text --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=elastio-reachability-analyzer}]')
+      instanceID=$(aws ec2 run-instances --image-id $ami --instance-type t2.nano --subnet-id $subnetID \
+        --associate-public-ip-address --query "Instances[].InstanceId" --output text --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=elastio-reachability-analyzer}]')
 
-	  while [[ $(aws ec2 describe-instances --instance-ids $instanceID --query "Reservations[].Instances[].State.Name" --output text) != "running" ]]
-	  do
-	    sleep 5
-	  done
+      while [[ $(aws ec2 describe-instances --instance-ids $instanceID --query "Reservations[].Instances[].State.Name" --output text) != "running" ]]
+      do
+        sleep 5
+      done
 
-	  pathID=$(aws ec2 create-network-insights-path --source $instanceID --protocol TCP --filter-at-source '{"DestinationAddress": "8.8.8.8"}' \
-	    --query "NetworkInsightsPath.NetworkInsightsPathId" --output text)
+      pathID=$(aws ec2 create-network-insights-path --source $instanceID --protocol TCP --filter-at-source '{"DestinationAddress": "8.8.8.8"}' \
+        --query "NetworkInsightsPath.NetworkInsightsPathId" --output text)
 
-	  analysisID=$(aws ec2 start-network-insights-analysis --network-insights-path-id $pathID --query "NetworkInsightsAnalysis.NetworkInsightsAnalysisId" --output text)
+      analysisID=$(aws ec2 start-network-insights-analysis --network-insights-path-id $pathID --query "NetworkInsightsAnalysis.NetworkInsightsAnalysisId" --output text)
 
-	  while [[ $(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids $analysisID --query "NetworkInsightsAnalyses[].Status" --output text) != "succeeded" ]]
-	  do
-	    sleep 5
-	  done
+      while [[ $(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids $analysisID --query "NetworkInsightsAnalyses[].Status" --output text) != "succeeded" ]]
+      do
+        sleep 5
+      done
 
-	  analysisResult=$(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids $analysisID --query "NetworkInsightsAnalyses[].NetworkPathFound" --output text)
+      analysisResult=$(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids $analysisID --query "NetworkInsightsAnalyses[].NetworkPathFound" --output text)
 
-	  output=$(aws ec2 delete-network-insights-analysis --network-insights-analysis-id $analysisID)
+      output=$(aws ec2 delete-network-insights-analysis --network-insights-analysis-id $analysisID)
 
-	  output=$(aws ec2 delete-network-insights-path --network-insights-path-id $pathID)
+      output=$(aws ec2 delete-network-insights-path --network-insights-path-id $pathID)
 
-	  output=$(aws ec2 terminate-instances --instance-ids $instanceID)
+      output=$(aws ec2 terminate-instances --instance-ids $instanceID)
 
-	  echo " - $subnetID - Reachable: $analysisResult"
-	  echo
-	done
+      IPv4=$(aws ec2 describe-subnets --subnet-ids $subnetID --query "Subnets[].MapPublicIpOnLaunch" --output text)
+
+      echo " - $subnetID - Auto-assign public IPv4: $IPv4; Reachable: $analysisResult"
+    done
 done

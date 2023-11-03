@@ -12,6 +12,7 @@ then
   exit
 fi
 
+echo
 for ((i = 0 ; i < ${#vpcs[@]} ; i+=2)); do
   echo $v. ${vpcs[$i]} ${vpcs[$i+1]}
   vpcIDs+=(${vpcs[$i]})

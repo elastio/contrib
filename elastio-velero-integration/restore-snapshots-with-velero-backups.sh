@@ -76,7 +76,15 @@ export AWS_DEFAULT_REGION=$region
 if [ -z "$(aws s3 ls s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volumesnapshots.json.gz)" ];
 then
   echo
-  echo "Make sure s3 bucket exists and velero backup name is correct."
+  echo "Make sure s3 bucket exists, velero backup name and region are correct."
+  echo
+  exit
+fi
+
+if [ -z $(aws ec2 describe-volumes --filters "Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName" --query "Volumes[].VolumeId" --output text) ];
+then
+  echo
+  echo "Make sure namespace is correct. Please note namespace is case sensitive."
   echo
   exit
 fi

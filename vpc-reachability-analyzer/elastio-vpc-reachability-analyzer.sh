@@ -27,7 +27,22 @@ EOP
 # Fall back to regular echo if that's not available
 echo "$paragraph" | fmt -w "$(tput cols)" || echo "${paragraph}"
 
-region=$(aws configure get region)
+# Try to use AWS_REGION if it's set
+if [ -n "${AWS_REGION+x}" ]; then
+  region="$AWS_REGION"
+# If not, use AWS_DEFAULT_REGION
+elif [ -n "${AWS_DEFAULT_REGION+x}" ]; then
+  region="$AWS_DEFAULT_REGION"
+# If neither is set, use the default region from aws configure
+else
+  region=$(aws configure get region 2>/dev/null)
+  # If aws configure does not return a region, exit with an error
+  if [ -z "$region" ]; then
+    echo "AWS region is not set; set the AWS_REGION or AWS_DEFAULT_REGION env var or configure one with `aws configure`" >&2
+    exit 1
+  fi
+fi
+
 echo
 echo "Discovering available VPCs in ${region}..."
 

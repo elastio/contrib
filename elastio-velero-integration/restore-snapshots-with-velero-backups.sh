@@ -121,6 +121,7 @@ do
         echo
         echo "Cannot find recovery point of $volumeID with tag $veleroBackupName."
         echo
+	elastio version
         exit
       fi
 

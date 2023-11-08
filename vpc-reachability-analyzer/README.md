@@ -7,13 +7,15 @@ You may run this script on any Linux or macOS system, but the most convenient wa
 of an AWS CloudShell instance, in the region where you plan to deploy Elastio.
 
 To run the script, open a terminal (if using AWS CloudShell, open CloudShell by clicking on the CloudShell icon at the
-top of the AWS Console, to the left of the bell icon) and run the following command:
+top of the AWS Console, to the left of the bell icon) and run the following commands:
 
 ```
 wget https://raw.githubusercontent.com/elastio/contrib/master/vpc-reachability-analyzer/elastio-vpc-reachability-analyzer.sh
 chmod +x elastio-vpc-reachability-analyzer.sh
 ./elastio-vpc-reachability-analyzer.sh
+
 ```
+
 The script will output some instructions, and then a list of VPCs available to test, for example:
 
 ```
@@ -30,7 +32,7 @@ before running the script to avoid execution errors.
 Discovering available VPCs in us-east-2...
 
 1: vpc-e2563889 (Name: None, IsDefault: True)
-2: vpc-01a77fdcee459e9e6 (Name: Farcast-fuckaws4/Vpc, IsDefault: False)
+2: vpc-01a77fdcee459e9e6 (Name: ElastioTest, IsDefault: False)
 
 Select VPC (Press Enter to select VPC 1, or Ctrl-D to abort): 
 ```
@@ -52,4 +54,4 @@ If a subnet can be used with Elastio, it is listed as "Internet reachable: True"
 Elastio, the value will be `False`.
 
 For more information on how to configure a VPC for use by Elastio, see the [Elastio docs on VPC
-configuration](https://docs.elastio.com/docs/get-started/deployment-specifications/vpc-config)
+configuration](https://docs.elastio.com/docs/get-started/deployment-specifications/vpc-config).

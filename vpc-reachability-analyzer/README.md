@@ -10,9 +10,9 @@ To run the script, open a terminal (if using AWS CloudShell, open CloudShell by 
 top of the AWS Console, to the left of the bell icon) and run the following commands:
 
 ```
-wget https://raw.githubusercontent.com/elastio/contrib/master/vpc-reachability-analyzer/elastio-vpc-reachability-analyzer.sh
-chmod +x elastio-vpc-reachability-analyzer.sh
-./elastio-vpc-reachability-analyzer.sh
+wget -q -O elastio-vpc-test.sh https://raw.githubusercontent.com/elastio/contrib/master/vpc-reachability-analyzer/elastio-vpc-test.sh
+chmod +x elastio-vpc-test.sh
+./elastio-vpc-test.sh
 
 ```
 

@@ -81,14 +81,6 @@ then
   exit
 fi
 
-if [ -z $(aws ec2 describe-volumes --filters "Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName" --query "Volumes[].VolumeId" --output text) ];
-then
-  echo
-  echo "Make sure namespace is correct. Please note namespace is case sensitive."
-  echo
-  exit
-fi
-
 echo
 echo "Script started at $(date)"
 

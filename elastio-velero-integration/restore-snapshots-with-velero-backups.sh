@@ -121,7 +121,7 @@ for RP in ${RPs[*]}
 do
   sleep 2
   echo
-  output=$(elastio ebs restore --rp $RP --restore-asset-tags 2>&1)
+  elastio ebs restore --rp $RP --restore-asset-tags
 done
 
 echo

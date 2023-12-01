@@ -96,7 +96,7 @@ then
 fi
 
 #get RPs by namespace and velero backup name
-RPs=($(elastio rp list --limit 1000 | grep backup=$veleroBackupName | grep namespace=$namespaceName | grep -oP rp-[A-Za-z0-9]+))
+RPs=($(elastio rp list --limit 10000 | grep backup=$veleroBackupName | grep namespace=$namespaceName | grep -oP rp-[A-Za-z0-9]+))
 
 #exit if RPs not found
 if [ -z "$RPs" ];

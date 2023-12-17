@@ -127,6 +127,8 @@ done
 echo
 echo $(date)": EBS restore is in progress, the duration will depend on the data size."
 
+sleep 60
+
 #wait restore to finish
 while [[ $(elastio job list --output-format json --kind restore) != "[]" ]]
 do

@@ -132,6 +132,7 @@ sleep 60
 while [[ $(elastio job list --output-format json --kind restore) != "[]" ]]
 do
   sleep 60
+  echo -ne "."
 done
 
 #create snapshots with velero tags
@@ -152,6 +153,7 @@ do
   while [[ $(aws ec2 describe-snapshots --snapshot-ids $snapshotID --query "Snapshots[].State" --output text) != "completed" ]]
   do
     sleep 60
+    echo -ne "."
   done
   aws ec2 delete-volume --volume-id $(aws ec2 describe-snapshots --snapshot-ids $snapshotID --query "Snapshots[].VolumeId" --output text)
 done

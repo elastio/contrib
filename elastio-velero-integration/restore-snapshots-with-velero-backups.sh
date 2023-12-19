@@ -161,7 +161,7 @@ done
 echo
 echo $(date)": Snapshot(s) created:"
 s=0
-for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=default Name=tag:elastio:restored-from-rp,Values=* --query "Snapshots[].SnapshotId" --output text)
+for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName Name=tag:elastio:restored-from-rp,Values=* --query "Snapshots[].SnapshotId" --output text)
 do
   ((s++))
   echo $s. $snapshotID

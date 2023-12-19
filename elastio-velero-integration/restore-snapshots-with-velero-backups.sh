@@ -168,6 +168,8 @@ do
 done
 
 echo
+echo $(date)": Updating Velero configuration file."
+echo
 
 #download velero config file from s3
 aws s3 cp s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volumesnapshots.json.gz ./temp.json.gz
@@ -185,6 +187,7 @@ declare -i v=0
 for volumeID in $(cat temp.json | jq .[].spec.providerVolumeID -r)
 do
   snapshotID=$(aws ec2 describe-snapshots --filters Name=tag:elastio:restored-from-asset,Values=$volumeID Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Snapshots[].SnapshotId" --output text)
+  echo -ne "."
   if [ ! -z "$snapshotID" ];
   then
     cat temp.json | jq -c --arg snapshotID $snapshotID --argjson v $v '.[$v].status.providerSnapshotID |= $snapshotID' > volumesnapshots.json

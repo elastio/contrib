@@ -170,8 +170,6 @@ do
 done
 
 echo
-echo $(date)": Updating Velero configuration file."
-echo
 
 #download velero config file from s3
 aws s3 cp s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volumesnapshots.json.gz ./temp.json.gz
@@ -182,6 +180,10 @@ echo
 aws s3 cp ./temp.json.gz s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volumesnapshots-original-$(date +%s).json.gz
 
 gzip -d temp.json.gz
+
+echo
+echo $(date)": Updating Velero configuration file."
+echo
 
 #replace snapshot IDs with new values
 declare -i v=0
@@ -210,4 +212,5 @@ output=$(aws s3 cp ./$veleroBackupName-volumesnapshots.json.gz s3://$veleroS3Buc
 rm $veleroBackupName-volumesnapshots.json.gz
 
 echo
-echo "Snapshots of velero backup $veleroBackupName are restored. Please proceed with restore via velero CLI."
+echo $(date)": Snapshots of velero backup $veleroBackupName are restored. Please proceed with restore via velero CLI."
+echo

@@ -96,7 +96,7 @@ then
 fi
 
 #get RPs by namespace and velero backup name
-RPs=($(elastio rp list --tag kubernetes.io/created-for/pvc/namespace=$namespaceName  --tag velero.io/backup=$veleroBackupName | grep -oP rp-[A-Za-z0-9]+))
+RPs=($(elastio rp list --limit 1000 --tag velero.io/backup=$veleroBackupName | grep namespace=$namespaceName | grep -oP rp-[A-Za-z0-9]+))
 
 #exit if RPs not found
 if [ -z "$RPs" ];
@@ -120,17 +120,19 @@ done
 for RP in ${RPs[*]}
 do
   sleep 2
-  echo
-  elastio ebs restore --rp $RP --restore-asset-tags
+  var=$(elastio ebs restore --rp $RP --restore-asset-tags 2>&1)
 done
 
 echo
 echo $(date)": EBS restore is in progress, the duration will depend on the data size."
 
+sleep 60
+
 #wait restore to finish
 while [[ $(elastio job list --output-format json --kind restore) != "[]" ]]
 do
   sleep 60
+  echo -ne "."
 done
 
 #create snapshots with velero tags
@@ -138,6 +140,8 @@ for volumeID in $(aws ec2 describe-volumes --filters Name=tag:velero.io/backup,V
 do
   volumeTags=$(aws ec2 describe-volumes --volume-ids $volumeID | jq ".Volumes[0].Tags" | sed -r 's/"+//g' | sed -r 's/: +/=/g')
   snapshotID=$(aws ec2 create-snapshot --volume-id $volumeID --tag-specifications "ResourceType=snapshot,Tags=$volumeTags" --query "SnapshotId" --output text)
+  sleep 5
+  var=$(aws ec2 create-tags --resources $snapshotID --tags Key=elastio:nobackup,Value=true 2>&1)
 done
 
 echo
@@ -146,11 +150,12 @@ echo
 echo $(date)": Creating EBS snapshot(s), the duration will depend on the data size."
 
 #wait snapshot creation finish and remove EBS
-for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName Name=tag:elastio:restored-from-rp,Values=* --query "Snapshots[].SnapshotId" --output text)
+for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName Name=tag:elastio:restored-from-rp,Values=* Name=tag:elastio:nobackup,Values=true --query "Snapshots[].SnapshotId" --output text)
 do
   while [[ $(aws ec2 describe-snapshots --snapshot-ids $snapshotID --query "Snapshots[].State" --output text) != "completed" ]]
   do
     sleep 60
+    echo -ne "."
   done
   aws ec2 delete-volume --volume-id $(aws ec2 describe-snapshots --snapshot-ids $snapshotID --query "Snapshots[].VolumeId" --output text)
 done
@@ -158,7 +163,7 @@ done
 echo
 echo $(date)": Snapshot(s) created:"
 s=0
-for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=default Name=tag:elastio:restored-from-rp,Values=* --query "Snapshots[].SnapshotId" --output text)
+for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName Name=tag:elastio:restored-from-rp,Values=* Name=tag:elastio:nobackup,Values=true --query "Snapshots[].SnapshotId" --output text)
 do
   ((s++))
   echo $s. $snapshotID
@@ -176,12 +181,17 @@ aws s3 cp ./temp.json.gz s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroB
 
 gzip -d temp.json.gz
 
+echo
+echo $(date)": Updating Velero configuration file."
+echo
+
 #replace snapshot IDs with new values
 declare -i v=0
 
 for volumeID in $(cat temp.json | jq .[].spec.providerVolumeID -r)
 do
-  snapshotID=$(aws ec2 describe-snapshots --filters Name=tag:elastio:restored-from-asset,Values=$volumeID Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Snapshots[].SnapshotId" --output text)
+  snapshotID=$(aws ec2 describe-snapshots --filters Name=tag:elastio:restored-from-asset,Values=$volumeID Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName Name=tag:elastio:nobackup,Values=true --query "Snapshots[].SnapshotId" --output text)
+  echo -ne "."
   if [ ! -z "$snapshotID" ];
   then
     cat temp.json | jq -c --arg snapshotID $snapshotID --argjson v $v '.[$v].status.providerSnapshotID |= $snapshotID' > volumesnapshots.json
@@ -202,4 +212,5 @@ output=$(aws s3 cp ./$veleroBackupName-volumesnapshots.json.gz s3://$veleroS3Buc
 rm $veleroBackupName-volumesnapshots.json.gz
 
 echo
-echo "Snapshots of velero backup $veleroBackupName are restored. Please proceed with restore via velero CLI."
+echo $(date)": Snapshots of velero backup $veleroBackupName are restored. Please proceed with restore via velero CLI."
+echo

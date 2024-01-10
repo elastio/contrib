@@ -101,7 +101,7 @@ RPs=($(elastio rp list --limit 1000 --tag velero.io/backup=$veleroBackupName | g
 if [ ! -z "$RPs" ];
 then
   echo
-  echo $(date)": Found elastio recovery points with velero backup $veleroBackupName and namespace $namespaceName in AWS:"
+  echo $(date)": Found elastio recovery points with velero backup $veleroBackupName and namespace $namespaceName:"
   r=0
   for RP in ${RPs[*]}
   do
@@ -159,17 +159,20 @@ do
   fi
 done
 
-sleep 60
+sleep 30
 
 if [ "$(elastio job list --output-format json --kind restore)" != "[]" ];
 then
+echo
+echo
 echo $(date)": EBS restore is in progress, the duration will depend on the data size."
+echo
 fi
 
 #wait restore to finish
 while [[ $(elastio job list --output-format json --kind restore) != "[]" ]]
 do
-  sleep 60
+  sleep 30
   echo -ne "."
 done
 

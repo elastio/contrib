@@ -85,101 +85,105 @@ fi
 if [ ! -z "$(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Snapshots[].SnapshotId" --output text)" ];
 then
   echo
-  echo "Cannot proceed. Script is designed to restore entire namespace from a given backup. Snapshots with velero backup $veleroBackupName and namespace $namespaceName are present in AWS:"
+  echo $(date)": Found snapshots with velero backup $veleroBackupName and namespace $namespaceName in AWS:"
   s=0
   for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Snapshots[].SnapshotId" --output text)
   do
     ((s++))
     echo $s. $snapshotID
+	var=$(aws ec2 delete-tags --resources $snapshotID --tags Key=elastio:imported-to-rp 2>&1)
+	var=$(aws ec2 create-tags --resources $snapshotID --tags Key=elastio:velero,Value=true 2>&1)
   done
-  exit
 fi
 
 #get RPs by namespace and velero backup name
 RPs=($(elastio rp list --limit 1000 --tag velero.io/backup=$veleroBackupName | grep namespace=$namespaceName | grep -oP rp-[A-Za-z0-9]+))
-
-#exit if RPs not found
-if [ -z "$RPs" ];
+if [ ! -z "$RPs" ];
 then
   echo
-  echo "No elastio recovery points matching your request were found. Make sure namespace and velero backup name are correct."
-  echo
-  exit
+  echo $(date)": Found elastio recovery points with velero backup $veleroBackupName and namespace $namespaceName:"
+  r=0
+  for RP in ${RPs[*]}
+  do
+    ((r++))
+    echo $r. $RP
+  done
 fi
 
+#download velero config file from s3
+var=$(aws s3 cp s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volumesnapshots.json.gz ./temp.json.gz 2>&1)
+
+#upload a backup of config to s3
+var=$(aws s3 cp ./temp.json.gz s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volumesnapshots-original-$(date +%s).json.gz 2>&1)
+
+gzip -d temp.json.gz
+
 echo
-echo $(date)": Found elastio recovery points:"
-r=0
-for RP in ${RPs[*]}
+echo $(date)": Working with snashots list of the $veleroBackupName velero backup."
+echo
+
+for backup in $(cat temp.json  | jq .[] -c)
 do
-  ((r++))
-  echo $r. $RP
+  echo -ne "."
+  #for each volume in the velero backup get volume and snapshot ids
+  snapshot=$(echo $backup | jq .status.providerSnapshotID -r)
+  volume=$(echo $backup | jq .spec.providerVolumeID -r)
+  if [ "$snapshot" != "null" ]
+  then
+    #check if snapshot is still present in the aws
+    snapshotinaws=$(aws ec2 describe-snapshots --snapshot-ids $snapshot --query "Snapshots[].SnapshotId" --output text 2>/dev/null)
+    #if snapshot not present in aws check elastio rps
+    if [ -z "$snapshotinaws" ];
+    then
+      elastiorp=$(elastio rp list --ebs $volume --tag velero.io/backup=$veleroBackupName 2>/dev/null)
+      if [ -z "$elastiorp" ];
+      then
+        echo "ERROR: elastio recovery point of snapshot $snapshot for velero backup $veleroBackupName is missing. This might affect velero restore."
+      fi
+      if [ ! -z "$elastiorp" ];
+      then
+        elastiorpid=$(echo $elastiorp | grep -oP rp-[A-Za-z0-9]+)
+        nanesmace=$(echo $elastiorp | grep -oP $namespaceName)
+        #if elastio rp has a tag with given namespace start restore
+        if [ "$nanesmace" = "$namespaceName" ]
+    	then
+    	  var=$(elastio ebs restore --rp $elastiorpid --restore-asset-tags --restore-snapshots --tag elastio:velero=true 2>&1)
+    	fi
+      fi
+    fi
+  fi
+  #some backups has failed snapshot status, nothing we can do here
+  if [ "$snapshot" = "null" ]
+  then
+    echo "Velero backup $veleroBackupName is missing snapshot for volume $volume. This might affect velero restore."
+  fi
 done
 
-#run restore of RPs
-for RP in ${RPs[*]}
-do
-  sleep 2
-  var=$(elastio ebs restore --rp $RP --restore-asset-tags 2>&1)
-done
+sleep 30
 
+if [ "$(elastio job list --output-format json --kind restore)" != "[]" ];
+then
+echo
 echo
 echo $(date)": EBS restore is in progress, the duration will depend on the data size."
-
-sleep 60
+echo
+fi
 
 #wait restore to finish
 while [[ $(elastio job list --output-format json --kind restore) != "[]" ]]
 do
-  sleep 60
+  sleep 30
   echo -ne "."
 done
 
-#create snapshots with velero tags
-for volumeID in $(aws ec2 describe-volumes --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName --query "Volumes[].VolumeId" --output text)
-do
-  volumeTags=$(aws ec2 describe-volumes --volume-ids $volumeID | jq ".Volumes[0].Tags" | sed -r 's/"+//g' | sed -r 's/: +/=/g')
-  snapshotID=$(aws ec2 create-snapshot --volume-id $volumeID --tag-specifications "ResourceType=snapshot,Tags=$volumeTags" --query "SnapshotId" --output text)
-  sleep 5
-  var=$(aws ec2 create-tags --resources $snapshotID --tags Key=elastio:nobackup,Value=true 2>&1)
-done
-
 echo
-echo $(date)": EBS restore is completed."
-echo
-echo $(date)": Creating EBS snapshot(s), the duration will depend on the data size."
-
-#wait snapshot creation finish and remove EBS
-for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName Name=tag:elastio:restored-from-rp,Values=* Name=tag:elastio:nobackup,Values=true --query "Snapshots[].SnapshotId" --output text)
-do
-  while [[ $(aws ec2 describe-snapshots --snapshot-ids $snapshotID --query "Snapshots[].State" --output text) != "completed" ]]
-  do
-    sleep 60
-    echo -ne "."
-  done
-  aws ec2 delete-volume --volume-id $(aws ec2 describe-snapshots --snapshot-ids $snapshotID --query "Snapshots[].VolumeId" --output text)
-done
-
-echo
-echo $(date)": Snapshot(s) created:"
+echo $(date)": Snapshot(s) available for the velero restore:"
 s=0
-for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName Name=tag:elastio:restored-from-rp,Values=* Name=tag:elastio:nobackup,Values=true --query "Snapshots[].SnapshotId" --output text)
+for snapshotID in $(aws ec2 describe-snapshots --filters Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName Name=tag:elastio:velero,Values=true --query "Snapshots[].SnapshotId" --output text)
 do
   ((s++))
   echo $s. $snapshotID
 done
-
-echo
-
-#download velero config file from s3
-aws s3 cp s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volumesnapshots.json.gz ./temp.json.gz
-
-echo
-
-#upload a backup of config to s3
-aws s3 cp ./temp.json.gz s3://$veleroS3Bucket/backups/$veleroBackupName/$veleroBackupName-volumesnapshots-original-$(date +%s).json.gz
-
-gzip -d temp.json.gz
 
 echo
 echo $(date)": Updating Velero configuration file."
@@ -190,7 +194,7 @@ declare -i v=0
 
 for volumeID in $(cat temp.json | jq .[].spec.providerVolumeID -r)
 do
-  snapshotID=$(aws ec2 describe-snapshots --filters Name=tag:elastio:restored-from-asset,Values=$volumeID Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName Name=tag:elastio:nobackup,Values=true --query "Snapshots[].SnapshotId" --output text)
+  snapshotID=$(aws ec2 describe-snapshots --filters Name=tag:elastio:restored-from-asset,Values=$volumeID Name=tag:velero.io/backup,Values=$veleroBackupName Name=tag:kubernetes.io/created-for/pvc/namespace,Values=$namespaceName Name=tag:elastio:velero,Values=true --query "Snapshots[].SnapshotId" --output text)
   echo -ne "."
   if [ ! -z "$snapshotID" ];
   then

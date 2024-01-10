@@ -101,7 +101,7 @@ RPs=($(elastio rp list --limit 1000 --tag velero.io/backup=$veleroBackupName | g
 if [ ! -z "$RPs" ];
 then
   echo
-  echo $(date)": Found elastio recovery points:"
+  echo $(date)": Found elastio recovery points with velero backup $veleroBackupName and namespace $namespaceName in AWS:"
   r=0
   for RP in ${RPs[*]}
   do
@@ -124,6 +124,7 @@ echo
 
 for backup in $(cat temp.json  | jq .[] -c)
 do
+  echo -ne "."
   #for each volume in the velero backup get volume and snapshot ids
   snapshot=$(echo $backup | jq .status.providerSnapshotID -r)
   volume=$(echo $backup | jq .spec.providerVolumeID -r)

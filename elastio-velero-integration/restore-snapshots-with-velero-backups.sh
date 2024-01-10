@@ -161,7 +161,7 @@ done
 
 sleep 60
 
-if [ $(elastio job list --output-format json --kind restore) != "[]" ];
+if [ "$(elastio job list --output-format json --kind restore)" != "[]" ];
 then
 echo $(date)": EBS restore is in progress, the duration will depend on the data size."
 fi

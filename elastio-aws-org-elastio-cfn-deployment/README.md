@@ -31,6 +31,9 @@ terraform apply -auto-approve
 
 ## Launching the product
 
+_(Both cli commands are supposed to be run under target account where the
+elastio cfn stack needs to be deployed)_
+
 Provision product from the initial artifact:
 
 ```bash

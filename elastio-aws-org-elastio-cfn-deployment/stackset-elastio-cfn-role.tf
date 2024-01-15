@@ -2,9 +2,6 @@ resource "aws_cloudformation_stack_set" "elastio_cfn_role" {
   name             = "ElastioCfnRole"
   permission_model = "SERVICE_MANAGED"
 
-  # FIXME: Too permissive trust policy. At this stage I'm not sure what
-  # identities should be trusted so that they can launch Service Catalog
-  # products.
   template_body = <<-EOT
     AWSTemplateFormatVersion: "2010-09-09"
     Description: "Create an IAM role for Elastio CloudFormation Deployment"

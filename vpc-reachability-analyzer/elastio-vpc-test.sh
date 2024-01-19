@@ -60,7 +60,7 @@ then
 fi
 
 echo
-for ((i = 0 ; i < ${#vpcs[@]} ; i+=3)); do
+for ((i = 0 ; i < ${#vpcs[@]-2} ; i+=3)); do
   vpc_id=${vpcs[$i]}
   is_default=${vpcs[$i+1]}
   name_tag=${vpcs[$i+2]}

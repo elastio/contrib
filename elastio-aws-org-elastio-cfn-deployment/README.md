@@ -1,10 +1,9 @@
 # elastio-aws-org-elastio-cfn-deployment
 
-With this solution you can in a simple way redistribute elastio cfn deployment
-across your org.
+With this solution you can easily bulk-deploy the Elastio CFN across your AWS organization.
 
 Terraform code what implements it deploys a service catalog product, which is
-shared across the org and could be used to deploy elastio cfn stack in exiting
+shared across the org and could be used to deploy Elastio CFN stack in existing
 accounts, also part of the code is a lambda that listens for new account
 creation events and triggers a product provisioning in a new account.
 
@@ -17,7 +16,7 @@ creation events and triggers a product provisioning in a new account.
   - Python 3.6 or newer
   - zip
   - terraform 0.13 or newer
-  - aws cli
+  - AWS CLI
 
 ## Usage
 
@@ -26,13 +25,13 @@ To deploy the solution run the following commands:
 ```console
 terraform init
 terraform plan
-terraform apply -auto-approve
+terraform apply
 ```
 
 ## Launching the product
 
-_(Both cli commands are supposed to be run under target account where the
-elastio cfn stack needs to be deployed)_
+_(Both CLI commands are supposed to be run under target account where the
+Elastio CFN stack needs to be deployed)_
 
 Provision product from the initial artifact:
 

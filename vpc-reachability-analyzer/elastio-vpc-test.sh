@@ -132,10 +132,7 @@ do
 
   analysisResult=$(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids $analysisID --query "NetworkInsightsAnalyses[].NetworkPathFound" --output text)
 
-  echo "  Cleaning up reachability analysis"
-  output=$(aws ec2 delete-network-insights-analysis --network-insights-analysis-id $analysisID)
-
-  output=$(aws ec2 delete-network-insights-path --network-insights-path-id $pathID)
+  echo "Analysis $analysisID path $pathID result: $analysisResult"
 
   echo "  Terminating test instance ${instanceID}..."
   output=$(aws ec2 terminate-instances --instance-ids $instanceID)

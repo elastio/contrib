@@ -60,12 +60,12 @@ then
 fi
 
 echo
-for ((i = 0 ; i < ${#vpcs[@]-2} ; i+=3)); do
+for ((i = 0 ; i < ${#vpcs[@]} ; i+=3)); do
   vpc_id=${vpcs[$i]}
   is_default=${vpcs[$i+1]}
-  name_tag=${vpcs[$i+2]}
+  #name_tag=${vpcs[$i+2]}
 
-  echo "$v: ${vpc_id} (Name: ${name_tag}, IsDefault: ${is_default})"
+  echo "$v: ${vpc_id} (Name: NA, IsDefault: ${is_default})"
   vpcIDs+=(${vpcs[$i]})
   ((v++))
 done

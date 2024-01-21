@@ -46,29 +46,23 @@ fi
 echo
 echo "Discovering available VPCs in ${region}..."
 
-vpcIDs=()
 v=1
-vpcs=($(aws ec2 describe-vpcs --query 'Vpcs[].[VpcId,IsDefault,Tags[?Key==`Name`].Value]' --output text))
-subnet_info=() # Array to store subnet details
+declare -A vpcIDs
+echo
+while IFS=$'\t' read -r vpc_id is_default name_tag
+do
+  echo "$v: ${vpc_id} (Name: ${name_tag}, IsDefault: ${is_default})"
+  vpcIDs[$v-1]=$vpc_id
+  ((v++))
+done < <(aws ec2 describe-vpcs --query 'Vpcs[].[VpcId,IsDefault,Tags[?Key==`Name`].Value | [0]]' --output json | jq -r '.[] | @tsv')
 
-if [ -z "$vpcs" ];
+
+if [ $v -eq 1 ];
 then
-  echo
-  echo "Could not find any VPCs."
-  echo
+  echo $v
+  echo "No VPCs found in ${region}."
   exit
 fi
-
-echo
-for ((i = 0 ; i < ${#vpcs[@]} ; i+=3)); do
-  vpc_id=${vpcs[$i]}
-  is_default=${vpcs[$i+1]}
-  #name_tag=${vpcs[$i+2]}
-
-  echo "$v: ${vpc_id} (Name: NA, IsDefault: ${is_default})"
-  vpcIDs+=(${vpcs[$i]})
-  ((v++))
-done
 
 echo
 read -p "Select VPC (Press Enter to select VPC 1, or Ctrl-D to abort): " vpc

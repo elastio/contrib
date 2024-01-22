@@ -114,9 +114,13 @@ do
   echo "  Test instance ${instanceID} is running; evaluating reachability..."
 
   pathID=$(aws ec2 create-network-insights-path --source $instanceID --protocol TCP --filter-at-source '{"DestinationAddress": "8.8.8.8"}' \
+    --tag-specifications 'ResourceType=network-insights-path,Tags=[{Key=Name,Value=Elastio VPC test - '"${subnet_display_name}"'}]' \
     --query "NetworkInsightsPath.NetworkInsightsPathId" --output text)
 
-  analysisID=$(aws ec2 start-network-insights-analysis --network-insights-path-id $pathID --query "NetworkInsightsAnalysis.NetworkInsightsAnalysisId" --output text)
+  analysisID=$(aws ec2 start-network-insights-analysis --network-insights-path-id $pathID \
+    --tag-specifications 'ResourceType=network-insights-analysis,Tags=[{Key=Name,Value=Elastio VPC test - '"${subnet_display_name}"'}]' \
+    --query "NetworkInsightsAnalysis.NetworkInsightsAnalysisId" \
+    --output text)
 
   while [[ $(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids $analysisID --query "NetworkInsightsAnalyses[].Status" --output text) != "succeeded" ]]
   do

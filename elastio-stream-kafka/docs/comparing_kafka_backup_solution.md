@@ -1,84 +1,8 @@
-# Kafka Stream Backup with Elastio <!--Discuss another naming-->
+# Comparing Kafka Backup Solutions
 
-# The need for a Backup Solution for Kafka
-Kafka is a highly distributed system and can be configured to provide
-a high level of resilience on its own. Using a large replication
-factor we can survive the loss of several brokers and when we stretch
-out Kafka Cluster across multiple data centers (the latency should stay
-below 30ms), we can even survive the loss of data centers! So why should
-we care about backups if we can just increase the distribution of
-Kafka?
+Basically there are three other ways to backup and restore data
+from/to Kafka:
 
-## Replication does not replace backups
-Replication handles many error cases, but by far not all. What if there is 
-a bug in Kafka that deletes old data? What about a misconfiguration of the 
-topic (are you sure that your values of replica.lag.max.messages, 
-replica.lag.time.max.ms are good values?). What if an admin has accidentally 
-deleted the Prod Cluster because he thought he was on dev? 
-What about security breaches? If an attacker gets access to your Kafka 
-Management interface, they can do whatever they like.
-
-If you use Kafka as your "main system" for your company and you store your
-core business data in Kafka, you'd better think about a cold storage backup
-for your Kafka Cluster.
-
-## Why should I pay for the additional Kafka Clusters?
-In case with Kafka replication solves more complex problems, but actually you
-pay for storing your copied data in the neighboring topic or in another cluster.
-If you do not use Kafka for "Big Data" applications, you are probably totally fine
-with just one small Kafka Cluster. Maybe your applications run only in one data
-center and this is totally ok for you. Then there is probably no need to set up
-and operate additional Kafka Clusters. If your data center with all your
-applications shuts down, what's the use to stretch high available Kafka Cluster?
-You would be probably absolutely fine if you have just a backup  of all your data 
-on an storage that you could replay to restore operations.
-
-# What is Kafka Stream Backup with Elastio?
-Kafka Stream backup with Elastio consists of two pieces: one for `Backup(implemented as python-kafka
-Consumer with elastio stream backup)` and one for the `Restore(implemented as python-kafka
-Producer with elastio stream restore)`.
-
-The `Backup` from the python-kafka consumer connects to a Kafka Broker and continuously
-fetches data from the specified topic and writes it to Elastio vault. Similarly to Kafka,
-Elastio Stream backup does not change the data, but writes it without modification
-as bytes to Elastio vault. Kafka Stream Backup with Elastio uses incremental backup of data
-to minimize storage space and excludes duplication of data.
-
-Similarly, the `Restore` connects to Kafka Brokers and streams data in the Elastio vault.
-To reduce errors, you need to explicitly define the topic to restore. 
-Kafka Stream backup with Elastio does not restore `__consumer_offsets`.It is not enough to 
-just copy the__consumer_offsets topic because the actual offsets of the messages may be changed.
-In order to keep the correct sequence of records and their position,
-we segregate them by partition in for each topic.
-
-
-# Use cases
-1. Backup and Restore Kafka topic in original formats.
-2. Backup and Restore Kafka internal topics: `__consumer_offsets`, 
-`__amazon_msk_canary`. Don't try backup topics: `_schemas`, because is
-used by Schema Registry to store all the schemas,
-metadata and compatibility configuration this topic
-couldn't be changed/write by user.
-
-
-# Setup
-[Quick Start Guide](docs/quick_start.md)
-1. Clone the repository or download .zip file with the repository.
-2. Before installing update your `pip`, copy and run the following command:
-   
-    ```
-    python3 -m pip install --upgrade pip
-   
-    ```
-3. Open **elastio-stream-kafka** directory in your terminal. <!--Discuss another naming-->
-4. Install dependencies with the following command:
-   
-    ```
-    python3 -m pip install -r requirements.txt
-    ```
-
-
-# Alternatives
 ## File System Snapshots
 
 This was the easiest and the most reliable way to backup data and consumer
@@ -90,7 +14,7 @@ another (cold) disk.
 
 * Repeat for each Kafka broker:
   1. Shut down the broker
-  2. Take a snapshot of the filesystem (optional)
+  2. Take a snapshot of the Filesystem (optional)
   3. Copy the snapshot (or simply the files) to the backup storage
   4. Turn on the broker and wait until all partitions are in sync mode
 
@@ -114,13 +38,13 @@ another (cold) disk.
 **Disadvantages:**
 
 * Each message is backed up by a `replication factor`number of times. Even if it
-  is sufficient to store it without replication.
-* Reduced availability as every broker needs to be turned off for a
+  is enough to store it without replication.
+* Reduced availability as every broker needs to be turned of for a
   backup
 * Incremental backups are harder to achieve (e.g. due to partition
   rebalancing)
 * **POTENTIAL DATA LOSS**: If the backup is performed during a
-  partition rebalancing (it is very likely when the backup takes a long
+  partition rebalance (it is very likely when the backup takes a long
   time), the backup could miss a whole partition due to bad timing.
 
 ## Using Mirror Maker 2 to backup data to another Cluster
@@ -174,8 +98,8 @@ Kafka Mirror Maker 2 solves many of these and can be used to back up data from o
 
 **Advantages:**
 
-* Supports for warm cluster fail-over (active-active, active-passive)
-* Supports for more advanced cluster topologies
+* Support for warm cluster fail-over (active-active, active-passive)
+* Support for more advanced cluster topologies
 
 **Disadvantages:**
 
@@ -217,3 +141,35 @@ Loss](https://jobs.zalando.com/tech/blog/backing-up-kafka-zookeeper/)
 
 * Supports only S3 (and compatible systems) as the storage backend.
 * No support for restoring consumer offsets (the method described above could be described as solution for one case and will not work in many cases)
+
+## `elastio-stream-kafka`
+`elastio-stream-kafka` is a simple but smart application that sends and stores your data to Elastio. It can be used as intended on a local machine or virtual machine, on AWS ECS with a scheduled task or with other similar services.
+
+**Backup Procedure:**
+
+* Checking if a topic was previously backed up.
+    * if a previously backed up topic gets last stored message offset for every partition.
+    * another topic that wasn't previously backed up, stores all messages from the beginning of the topic.
+* Create Kafka Consumer, connecting to cluster.
+* Check if topic partitions have new messages.
+* Read data from Kafka topic stream to `elastio stream backup`.
+* Save the information about the time interval of a point in the recovery point tags.
+
+**Restore Procedure:**
+
+* Create Kafka Producer, connect to cluster.
+* Run `elastio stream restore` process.
+* Read data from a process and write to a topic for recovery.
+
+**Advantages:**
+
+* Messages offsets are automatically controlled during the  backup so that duplicate or empty recovery points are not created.
+* Kafka cluster does not stop working when backing up the data.
+* Default Kafka consumer group is not used.
+* Easily expandable for specific tasks.
+* Data from backed up interval stored in one file and could be filtered by user upon restore.
+
+**Disadvantages:**
+
+* Don't support automated restore of all recovery points for the topic. Should be restored manually, one by one.
+* No support for restoring consumer offsets.

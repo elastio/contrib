@@ -29,7 +29,6 @@ def new_message_exists(topic: str, bootstrap_servers: list, partition: int, offs
         consumer_timeout_ms=10000, # 10s
         api_version=(0, 10, 1)
     )
-    new_message_info = {}
     minimal_new_message_count_to_backup = 2 # first and last
     new_message_count = 0
     consumer.assign([TopicPartition(topic, partition), ])

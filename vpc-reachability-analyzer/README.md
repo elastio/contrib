@@ -13,8 +13,15 @@ top of the AWS Console, to the left of the bell icon) and run the following comm
 wget -q -O elastio-vpc-test.sh https://raw.githubusercontent.com/elastio/contrib/master/vpc-reachability-analyzer/elastio-vpc-test.sh
 chmod +x elastio-vpc-test.sh
 ./elastio-vpc-test.sh
-
 ```
+
+> NOTE: if you have an SCP or other policy mechanism that requires EC2 instances be created with certain tags, 
+> use the `--instance-tags` argument to the `elastio-vpc-test.sh` script to specify the tags.  Here's an example of how
+> you can modify the last line in the script above to set tags:
+> 
+> ```
+> ./elastio-vpc-test.sh --instance-tags Key=my-custom-tag,Value=foo,Key=my-other-custom-tag,Value=bar
+> ```
 
 The script will output some instructions, and then a list of VPCs available to test, for example:
 
@@ -52,6 +59,9 @@ Subnet Analysis Results:
 
 If a subnet can be used with Elastio, it is listed as "Internet reachable: True".  If it's not suitable for use with
 Elastio, the value will be `False`.
+
+If a subnet reports `False` for internet reachability, review the corresponding Network Insights path created 
+by the script, to understand why exactly it produced that result.
 
 For more information on how to configure a VPC for use by Elastio, see the [Elastio docs on VPC
 configuration](https://docs.elastio.com/docs/get-started/deployment-specifications/vpc-config).

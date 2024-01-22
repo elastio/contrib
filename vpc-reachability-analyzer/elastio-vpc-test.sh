@@ -43,6 +43,30 @@ else
   fi
 fi
 
+extra_tags=
+
+# Searching for --instance-tags param
+while (( "$#" )); do
+  case "$1" in
+    --instance-tags)
+      if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+        extra_tags=$2
+        shift 2
+      else
+        echo "Error: Argument for $1 is missing" >&2
+        exit 1
+      fi
+      ;;
+    -*|--*=)
+      echo "Error: Unsupported flag $1" >&2
+      exit 1
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
+
 echo
 echo "Discovering available VPCs in ${region}..."
 
@@ -96,6 +120,18 @@ do
 
   echo "Testing ${subnet_display_name} in ${vpcID} by launching a test t2.micro EC2 instance..."
 
+  # Default tags to apply to the test instance
+  default_tags="{Key=Name,Value=elastio-vpc-reachability-test $subnetID}"
+
+  # Combine default and extra tags to create a single set of tags for the temp EC2 instance
+  if [ -n "$extra_tags" ]
+  then
+      tags="ResourceType=instance,Tags=[$default_tags,${extra_tags}]"
+      echo "Using custom instance tags: ${tags}"
+  else
+      tags="ResourceType=instance,Tags=[$default_tags]"
+  fi
+
   IPv4=$(aws ec2 describe-subnets --subnet-ids $subnetID --query "Subnets[].MapPublicIpOnLaunch" --output text)
   instanceID=$(aws ec2 run-instances \
     --image-id resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
@@ -103,7 +139,7 @@ do
     --subnet-id $subnetID \
     --query "Instances[].InstanceId" \
     --output text \
-    --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=elastio-vpc-reachability-test}]')
+    --tag-specifications "${tags}")
 
   while [[ $(aws ec2 describe-instances --instance-ids $instanceID --query "Reservations[].Instances[].State.Name" --output text) != "running" ]]
   do
@@ -113,7 +149,9 @@ do
 
   echo "  Test instance ${instanceID} is running; evaluating reachability..."
 
-  pathID=$(aws ec2 create-network-insights-path --source $instanceID --protocol TCP --filter-at-source '{"DestinationAddress": "8.8.8.8"}' \
+  pathID=$(aws ec2 create-network-insights-path --source $instanceID \
+    --protocol TCP \
+    --filter-at-source 'DestinationAddress=8.8.8.8,DestinationPortRange={FromPort=443,ToPort=443}' \
     --tag-specifications 'ResourceType=network-insights-path,Tags=[{Key=Name,Value=Elastio VPC test - '"${subnet_display_name}"'}]' \
     --query "NetworkInsightsPath.NetworkInsightsPathId" --output text)
 
@@ -131,6 +169,7 @@ do
   analysisResult=$(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids $analysisID --query "NetworkInsightsAnalyses[].NetworkPathFound" --output text)
 
   echo "Analysis $analysisID path $pathID result: $analysisResult"
+  echo "Result details: https://us-east-2.console.aws.amazon.com/networkinsights/home?region=us-east-2#NetworkPathAnalysis:analysisId=${analysisID}"
 
   echo "  Terminating test instance ${instanceID}..."
   output=$(aws ec2 terminate-instances --instance-ids $instanceID)

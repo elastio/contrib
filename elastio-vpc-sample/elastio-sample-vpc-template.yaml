@@ -1,0 +1,241 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  This CloudFormation template creates a VPC with three private subnets across
+  three availability zones, a NAT gateway, and an S3 gateway endpoint. It allows
+  users to set custom names for the VPC and its subnets through parameters with
+  default values set to empty strings.
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: 'Network CIDR options'
+        Parameters:
+          - VpcCidr
+          - PublicSubnetCidr
+          - PrivateSubnet1Cidr
+          - PrivateSubnet2Cidr
+          - PrivateSubnet3Cidr
+      - Label:
+          default: 'Network name customization options'
+        Parameters:
+          - VpcPrefix
+          - VpcSuffix
+          - SubnetPrefix
+          - SubnetSuffix
+
+Parameters:
+  VpcPrefix:
+    Type: String
+    Default: ''
+    Description: (Optional) The prefix to use for naming the VPC and VPC-specific resources. Leave blank for no prefix.  Note all resources will have a name starting with `Elastio`, so there is no need to specify Elastio here.
+  VpcSuffix:
+    Type: String
+    Default: ''
+    Description: (Optional) The suffix to use for naming the VPC and VPC-specific resources. Leave blank for no prefix.  Note all resources will have a name starting with `Elastio`, so there is no need to specify Elastio here.
+  SubnetPrefix:
+    Type: String
+    Default: ''
+    Description: (Optional) The prefix to use for naming the subnets and subnet-specific resources. Leave blank for no prefix.  Note all resources will have a name starting with `Elastio`, so there is no need to specify Elastio here.
+  SubnetSuffix:
+    Type: String
+    Default: ''
+    Description: (Optional) The suffix to use for naming the subnets and subnet-specific resources. Leave blank for no prefix.  Note all resources will have a name starting with `Elastio`, so there is no need to specify Elastio here.
+
+  VpcCidr:
+    Type: String
+    Default: '10.0.0.0/16'
+    Description: The CIDR block for the Elastio VPC.
+  PublicSubnetCidr:
+    Type: String
+    Default: '10.0.0.0/20'
+    Description: The CIDR block for the public subnet where the NAT Gateway will be located.
+  PrivateSubnet1Cidr:
+    Type: String
+    Default: '10.0.16.0/20'
+    Description: The CIDR block for the first private subnet.  Make sure it is large enough to provide IP addresses to all worker nodes.
+  PrivateSubnet2Cidr:
+    Type: String
+    Default: '10.0.32.0/20'
+    Description: The CIDR block for the second private subnet.  Make sure it is large enough to provide IP addresses to all worker nodes.
+  PrivateSubnet3Cidr:
+    Type: String
+    Default: '10.0.48.0/20'
+    Description: The CIDR block for the third private subnet.  Make sure it is large enough to provide IP addresses to all worker nodes.
+
+Resources:
+  ElastioVPC:
+    Type: 'AWS::EC2::VPC'
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      # The name tag for the VPC, using the custom parameters provided.
+      Tags:
+        - Key: Name
+          Value: !Sub '${VpcPrefix}Elastio${VpcSuffix}'
+
+  InternetGateway:
+    Type: 'AWS::EC2::InternetGateway'
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${VpcPrefix}ElastioInternetGateway${VpcSuffix}'
+
+  AttachGateway:
+    Type: 'AWS::EC2::VPCGatewayAttachment'
+    Properties:
+      VpcId: !Ref ElastioVPC
+      InternetGatewayId: !Ref InternetGateway
+
+  NatGatewayEIP:
+    Type: 'AWS::EC2::EIP'
+    Properties:
+      # EIP needs to be in the public subnet to assist the NAT gateway.
+      Domain: vpc
+
+  NatGateway:
+    Type: 'AWS::EC2::NatGateway'
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      AllocationId: !GetAtt NatGatewayEIP.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub '${VpcPrefix}ElastioNatGateway${VpcSuffix}'
+
+  PublicSubnet:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref ElastioVPC
+      CidrBlock: !Ref PublicSubnetCidr
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${SubnetPrefix}ElastioPublicSubnet${SubnetSuffix}'
+
+  # Create a route table for the public subnet
+  PublicRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref ElastioVPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${SubnetPrefix}ElastioPublicRouteTable${SubnetSuffix}'
+
+  # Create a route in the public route table to the internet gateway
+  PublicRoute:
+    Type: 'AWS::EC2::Route'
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId: !Ref InternetGateway
+
+  # Associate the public route table with the public subnet
+  PublicSubnetRouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # Creation of three private subnets, one in each availability zone
+  PrivateSubnet1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref ElastioVPC 
+      CidrBlock: !Ref PrivateSubnet1Cidr
+      # MapPublicIpOnLaunch is set to false to make this a private subnet.
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${SubnetPrefix}ElastioPrivateSubnet1${SubnetSuffix}'
+
+  PrivateSubnet2:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref ElastioVPC 
+      CidrBlock: !Ref PrivateSubnet2Cidr
+      # MapPublicIpOnLaunch is set to false to make this a private subnet.
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${SubnetPrefix}ElastioPrivateSubnet2${SubnetSuffix}'
+
+  PrivateSubnet3:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref ElastioVPC 
+      CidrBlock: !Ref PrivateSubnet3Cidr
+      # MapPublicIpOnLaunch is set to false to make this a private subnet.
+      MapPublicIpOnLaunch: false
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      Tags:
+        - Key: Name
+          Value: !Sub '${SubnetPrefix}ElastioPrivateSubnet3${SubnetSuffix}'
+
+  # Each subnet must have a route table associated with it.
+  # This is the route table for the private subnets:
+  PrivateRouteTable:
+    Type: 'AWS::EC2::RouteTable'
+    Properties:
+      VpcId: !Ref ElastioVPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${SubnetPrefix}ElastioPrivateRouteTable${SubnetSuffix}'
+
+  # A route in the private route table that points all traffic (0.0.0.0/0) to the NAT Gateway
+  PrivateRoute:
+    Type: 'AWS::EC2::Route'
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref NatGateway
+
+  # Associate the private route table with each of the private subnets
+  PrivateSubnet1RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet2RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnet3RouteTableAssociation:
+    Type: 'AWS::EC2::SubnetRouteTableAssociation'
+    Properties:
+      SubnetId: !Ref PrivateSubnet3
+      RouteTableId: !Ref PrivateRouteTable
+
+  # AWS S3 Gateway endpoint applicable to all subnets within the VPC
+  #
+  # This is important to ensure that Elastio's S3 traffic routes through the free S3 gateway endpoint,
+  # and not the very expensive NAT gateway.
+  S3VPCEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref ElastioVPC
+      # Indicating the endpoint is for a Gateway (as opposed to an Interface)
+      VpcEndpointType: Gateway
+      # Specifying which route tables to associate the endpoint with
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+        - !Ref PublicRouteTable
+      # There can be more route tables if public subnets or other route tables are defined
+
+Outputs:
+  VpcId:
+    Description: "The ID of the new VPC"
+    Value: !Ref ElastioVPC
+  PublicSubnet:
+    Description: "The ID of the public subnet which contains the Internet and NAT gateways"
+    Value: !Ref PublicSubnet
+  PrivateSubnets:
+    Description: "List of the private subnet IDs"
+    Value: !Join [", ", [!Ref PrivateSubnet1, !Ref PrivateSubnet2, !Ref PrivateSubnet3]]

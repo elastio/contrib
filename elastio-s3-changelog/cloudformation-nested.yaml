@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform:
+  - AWS::LanguageExtensions # for the Fn::ForEach function
+Parameters:
+  BucketNames:
+    Type: String
+  ScanExistingObjects:
+    Type: String
+    Default: 'false'
+  EnableQrts:
+    Type: String
+    Default: 'false'
+  KeyPrefixes:
+    Type: String
+Resources:
+  'Fn::ForEach::Stacks':
+    - BucketName
+    - !Split [',', !Ref BucketNames]
+    - 'stack&{BucketName}':
+        Type: AWS::CloudFormation::Stack
+        Properties:
+          Parameters:
+            BucketName: !Ref BucketName
+            ScanExistingObjects: !Ref ScanExistingObjects
+            EnableQrts: !Ref EnableQrts
+            KeyPrefixes: !Ref KeyPrefixes
+          TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-single.yaml

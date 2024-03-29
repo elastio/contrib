@@ -1,0 +1,262 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  BucketName:
+    Type: String
+    AllowedPattern: .{3,}
+    ConstraintDescription: Bucket name must be at least 3 characters long.
+    Description: S3 bucket name.
+
+  ScanExistingObjects:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      If set to true, the full initial scan of the bucket will be performed.
+      If set to false, only new objects in the bucket will be scanned.
+
+  EnableQrts:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      If set to true, enables quasi-realtime scanning.
+      If set to false, disables quasi-realtime scanning.
+
+  KeyPrefixes:
+    # Unfortunately, it's impossible to pass CommaDelimitedList to a nested stack,
+    # so we have to use String here, and then split it manually.
+    Type: String
+    AllowedPattern: ^(([^/,\s]+/)+)(,([^/,\s]+/)+)*$|^$
+    ConstraintDescription: Prefixes must end (but not start) with '/', and cannot contain spaces.
+    Description: >
+      Comma-delimited list of prefixes of objects to scan. If empty, all objects will be scanned.
+      Example: xyz/,foo/bar/
+
+Conditions:
+  ScanExistingObjects: !Equals [!Ref ScanExistingObjects, 'true']
+  EnableQrts: !Equals [!Ref EnableQrts, 'true']
+  NoKeyPrefixes: !Equals [!Ref KeyPrefixes, '']
+
+Resources:
+  queue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600 # 14 days
+      VisibilityTimeout: 43200 # 12 hours
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt dlq.Arn
+        maxReceiveCount: 3
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+        - Key: elastio:s3-changelog-bucket
+          Value: !Ref BucketName
+        - Key: elastio:s3-changelog-stack-arn
+          Value: !Ref AWS::StackId
+
+  dlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+      VisibilityTimeout: 43200
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+        - Key: elastio:s3-changelog-dlq
+          Value: !Ref BucketName
+        - Key: elastio:s3-changelog-stack-arn
+          Value: !Ref AWS::StackId
+
+  eventRule:
+    Type: AWS::Events::Rule
+    DependsOn: queue
+    Properties:
+      Description: !Sub Track new objects creation in ${BucketName}
+      EventPattern: !If
+        - NoKeyPrefixes
+        - !Sub >
+          {
+            "source": ["aws.s3"],
+            "detail-type": ["Object Created"],
+            "detail": { "bucket": { "name": ["${BucketName}"] } }
+          }
+        - !Join
+          - ''
+          - - !Sub >
+              {
+                "source": ["aws.s3"],
+                "detail-type": ["Object Created"],
+                "detail":
+                {
+                  "bucket": { "name": ["${BucketName}"] },
+                  "object": { "key": [
+            - !Sub
+              - '{ "prefix": "${prefixes}" }'
+              - prefixes: !Join
+                - '" },{ "prefix": "'
+                - !Split [',', !Ref KeyPrefixes]
+            - '] } } }'
+      Targets:
+        - Arn: !GetAtt queue.Arn
+          Id: changelog-queue
+          InputTransformer:
+            InputPathsMap:
+              key: '$.detail.object.key'
+              type: '$.detail-type'
+            InputTemplate:
+              '{
+                "objects": [{
+                  "key": <key>,
+                  "event_type": <type>
+                }]
+              }'
+
+  queueEventBridgePolicy:
+    Type: AWS::SQS::QueueInlinePolicy
+    Properties:
+      Queue: !Ref queue
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt queue.Arn
+            Principal:
+              Service: events.amazonaws.com
+            Condition:
+              ArnEquals:
+                'aws:SourceArn': !GetAtt eventRule.Arn
+
+  ssmParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub /elastio/s3/changelog/${BucketName}/${queue.QueueName}
+      Type: String
+      Value: !Sub
+        - >
+          {
+            "prefixes": [${prefixes}],
+            "qrts": ${EnableQrts}
+          }
+        - prefixes: !If
+          - NoKeyPrefixes
+          - ''
+          - !Sub
+            - '"${list}"'
+            - list: !Join
+              - '","'
+              - !Split [',', !Ref KeyPrefixes]
+      Tags:
+        'elastio:resource': 'true'
+
+  queueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: EnableQrts
+    Properties:
+      AlarmDescription: Alarm if queue depth increases too much.
+      ActionsEnabled: false
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt queue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+
+  queueDepthAlarmSubscription:
+    Type: AWS::Events::Rule
+    Condition: EnableQrts
+    Properties:
+      Description: Track queue depth alarm state
+      EventPattern:
+        source: [aws.cloudwatch]
+        detail-type: [CloudWatch Alarm State Change]
+        resources:
+          - !GetAtt queueDepthAlarm.Arn
+        detail:
+          state:
+            value: [ALARM]
+      Targets:
+        - Arn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-scheduler-handler-s3-changelog-qrts'
+          Id: event-handler
+          Input: !Sub >
+            {
+              "bucket_name": "${BucketName}",
+              "queue_url": "${queue}",
+              "queue_name": "${queue.QueueName}"
+            }
+
+  queueDepthAlarmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-scheduler-handler-s3-changelog-qrts'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt queueDepthAlarmSubscription.Arn
+
+  queueOldestMessageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: EnableQrts
+    Properties:
+      AlarmDescription: Alarm if the age of the oldest massage is too big.
+      ActionsEnabled: false
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt queue.QueueName
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 600 # 10 minutes
+      ComparisonOperator: GreaterThanThreshold
+
+  queueOldestMessageAlarmSubscription:
+    Type: AWS::Events::Rule
+    Condition: EnableQrts
+    Properties:
+      Description: Track queue oldest message alarm state
+      EventPattern:
+        source: [aws.cloudwatch]
+        detail-type: [CloudWatch Alarm State Change]
+        resources:
+          - !GetAtt queueOldestMessageAlarm.Arn
+        detail:
+          state:
+            value: [ALARM]
+      Targets:
+        - Arn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-scheduler-handler-s3-changelog-qrts'
+          Id: event-handler
+          Input: !Sub >
+            {
+              "bucket_name": "${BucketName}",
+              "queue_url": "${queue}",
+              "queue_name": "${queue.QueueName}"
+            }
+
+  queueOldestMessageAlarmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-scheduler-handler-s3-changelog-qrts'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt queueOldestMessageAlarmSubscription.Arn
+
+  scanExistingObjectsCustom:
+    Type: Custom::ScanExistingObjects
+    Condition: ScanExistingObjects
+    Properties:
+      ServiceToken: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-s3-changelog-handler-scan-existing-objects'
+      QueueUrl: !Ref queue
+      # We don't technically need key prefixes in the lambda,
+      # but we want CFN to trigger an update if prefixes has changed.
+      KeyPrefixes: !Ref KeyPrefixes
+
+Outputs:
+  queueArn:
+    Value: !GetAtt queue.Arn
+  dlqArn:
+    Value: !GetAtt dlq.Arn

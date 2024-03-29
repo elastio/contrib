@@ -1,0 +1,44 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  BucketNames:
+    Type: CommaDelimitedList
+    AllowedPattern: .{3,}
+    ConstraintDescription: Bucket name must be at least 3 characters long.
+    Description: >
+      Comma-delimited list of S3 bucket names.
+      Example: examplebucket1, examplebucket2
+
+  ScanExistingObjects:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      If set to true, the full initial scan of the bucket will be performed.
+      If set to false, only new objects in the bucket will be scanned.
+
+  EnableQrts:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      If set to true, enables quasi-realtime scanning.
+      If set to false, disables quasi-realtime scanning.
+
+  KeyPrefixes:
+    Type: CommaDelimitedList
+    AllowedPattern: ^([^/\s]+/)*$
+    ConstraintDescription: Prefixes must end (but not start) with '/'.
+    Description: >
+      Comma-delimited list of prefixes of objects to scan. If empty, all objects will be scanned.
+      Example: xyz/, foo/bar/
+
+Resources:
+  stack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        BucketNames: !Join [',', !Ref BucketNames]
+        ScanExistingObjects: !Ref ScanExistingObjects
+        EnableQrts: !Ref EnableQrts
+        KeyPrefixes: !Join [',', !Ref KeyPrefixes]
+      TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-nested.yaml

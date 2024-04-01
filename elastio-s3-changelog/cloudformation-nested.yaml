@@ -1,3 +1,7 @@
+# This file is not intended to be used on its own. It exists to work around a bug in CloudFormation.
+# The bug prevents updating the CFN stack containing Fn::ForEach in the AWS console. This is because
+# internally, CFN stores the template after resolving macros, so changing the input parameters has no effect.
+# Related issue: https://github.com/aws-cloudformation/cfn-language-discussion/issues/146
 AWSTemplateFormatVersion: "2010-09-09"
 Transform:
   - AWS::LanguageExtensions # for the Fn::ForEach function

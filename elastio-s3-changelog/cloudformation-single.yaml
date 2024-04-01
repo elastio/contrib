@@ -1,3 +1,4 @@
+# This template enables the S3 changelog for a single bucket.
 AWSTemplateFormatVersion: "2010-09-09"
 Parameters:
   BucketName:

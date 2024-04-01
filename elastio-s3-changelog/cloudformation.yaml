@@ -1,3 +1,5 @@
+# This template allows to enable the S3 changelog for multiple buckets.
+# It deploys one nested stack per bucket.
 AWSTemplateFormatVersion: "2010-09-09"
 Parameters:
   BucketNames:

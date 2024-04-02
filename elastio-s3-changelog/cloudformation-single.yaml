@@ -261,3 +261,5 @@ Outputs:
     Value: !GetAtt queue.Arn
   dlqArn:
     Value: !GetAtt dlq.Arn
+  templateVersion:
+    Value: "{{VERSION}}"

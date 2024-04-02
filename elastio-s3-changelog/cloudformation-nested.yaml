@@ -28,4 +28,7 @@ Resources:
             ScanExistingObjects: !Ref ScanExistingObjects
             EnableQrts: !Ref EnableQrts
             KeyPrefixes: !Ref KeyPrefixes
-          TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-single.yaml
+          TemplateURL: https://{{BUCKET}}.s3.{{REGION}}.amazonaws.com/{{PREFIX}}/{{VERSION}}/cloudformation-single.yaml
+Outputs:
+  templateVersion:
+    Value: "{{VERSION}}"

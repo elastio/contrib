@@ -43,4 +43,8 @@ Resources:
         ScanExistingObjects: !Ref ScanExistingObjects
         EnableQrts: !Ref EnableQrts
         KeyPrefixes: !Join [',', !Ref KeyPrefixes]
-      TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-nested.yaml
+      TemplateURL: https://{{BUCKET}}.s3.{{REGION}}.amazonaws.com/{{PREFIX}}/{{VERSION}}/cloudformation-nested.yaml
+
+Outputs:
+  templateVersion:
+    Value: "{{VERSION}}"

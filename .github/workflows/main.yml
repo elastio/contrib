@@ -23,7 +23,7 @@ jobs:
           token: ${{ secrets.SECRET_TOKEN }}
       - name: Check if files were modified
         id: filter
-        uses: "dorny/paths-filter@v3"
+        uses: dorny/paths-filter@v3
         with:
           filters: |
             ci:

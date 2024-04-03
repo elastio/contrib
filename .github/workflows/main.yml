@@ -69,7 +69,7 @@ jobs:
     if: needs.changes.outputs.elastio-s3-changelog == 'true'
     env:
       AWS_DEFAULT_REGION: us-east-2
-      S3_BUCKET: elastio-artifacts-us-east-2
+      S3_BUCKET: elastio-prod-artifacts-us-east-2
       S3_PREFIX: contrib
     steps:
       - name: Checkout repository

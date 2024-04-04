@@ -20,8 +20,24 @@ Parameters:
     AllowedValues: ['true', 'false']
     Default: 'false'
     Description: >
-      If set to true, enables quasi-realtime scanning.
-      If set to false, disables quasi-realtime scanning.
+      If set to true, enables quasi-realtime scanning (QRTS).
+      If set to false, disables QRTS.
+
+  QrtsBatchSize:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    Description: >
+      Defines the number of S3 object updates that will be buffered in the queue before the scan job will be triggered.
+      The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
+
+  QrtsMaxDelay:
+    Type: Number
+    Default: 300
+    MinValue: 1
+    Description: >
+      Defines the maximum delay in seconds between the object update and its scan.
+      The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
 
   KeyPrefixes:
     # Unfortunately, it's impossible to pass CommaDelimitedList to a nested stack,
@@ -30,8 +46,8 @@ Parameters:
     AllowedPattern: ^(([^/,\s]+/)+)(,([^/,\s]+/)+)*$|^$
     ConstraintDescription: Prefixes must end (but not start) with '/', and cannot contain spaces.
     Description: >
-      Comma-delimited list of prefixes of objects to scan. If empty, all objects will be scanned.
-      Example: xyz/,foo/bar/
+      Comma-delimited list of prefixes of objects to scan. Note that, unless QRTS is enabled, paths selector
+      in the Protection Policy will also be used to filter objects before scanning.
 
 Conditions:
   ScanExistingObjects: !Equals [!Ref ScanExistingObjects, 'true']
@@ -59,7 +75,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       MessageRetentionPeriod: 1209600
-      VisibilityTimeout: 43200
+      VisibilityTimeout: 30
       Tags:
         - Key: elastio:resource
           Value: 'true'
@@ -72,13 +88,13 @@ Resources:
     Type: AWS::Events::Rule
     DependsOn: queue
     Properties:
-      Description: !Sub Track new objects creation in ${BucketName}
+      Description: !Sub Track S3 object change events in ${BucketName}
       EventPattern: !If
         - NoKeyPrefixes
         - !Sub >
           {
             "source": ["aws.s3"],
-            "detail-type": ["Object Created"],
+            "detail-type": ["Object Created", "Object Deleted"],
             "detail": { "bucket": { "name": ["${BucketName}"] } }
           }
         - !Join
@@ -86,7 +102,7 @@ Resources:
           - - !Sub >
               {
                 "source": ["aws.s3"],
-                "detail-type": ["Object Created"],
+                "detail-type": ["Object Created", "Object Deleted"],
                 "detail":
                 {
                   "bucket": { "name": ["${BucketName}"] },
@@ -112,7 +128,7 @@ Resources:
                 }]
               }'
 
-  queueEventBridgePolicy:
+  queueInlinePolicy:
     Type: AWS::SQS::QueueInlinePolicy
     Properties:
       Queue: !Ref queue
@@ -131,13 +147,16 @@ Resources:
   ssmParameter:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Sub /elastio/s3/changelog/${BucketName}/${queue.QueueName}
+      Name: !Sub /elastio/s3/changelog/queue/${BucketName}/${queue.QueueName}
       Type: String
       Value: !Sub
         - >
           {
+            "queue_url": "${queue}",
             "prefixes": [${prefixes}],
-            "qrts": ${EnableQrts}
+            "qrts": ${EnableQrts},
+            "qrts_batch_size": ${QrtsBatchSize},
+            "qrts_max_delay": ${QrtsMaxDelay}
           }
         - prefixes: !If
           - NoKeyPrefixes
@@ -154,7 +173,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Condition: EnableQrts
     Properties:
-      AlarmDescription: Alarm if queue depth increases too much.
+      AlarmDescription: !Sub Alarm if queue depth increases to more than ${QrtsBatchSize} messages
       ActionsEnabled: false
       Namespace: AWS/SQS
       MetricName: ApproximateNumberOfMessagesVisible
@@ -164,45 +183,14 @@ Resources:
       Statistic: Maximum
       Period: 60
       EvaluationPeriods: 1
-      Threshold: 5
+      Threshold: !Ref QrtsBatchSize
       ComparisonOperator: GreaterThanThreshold
-
-  queueDepthAlarmSubscription:
-    Type: AWS::Events::Rule
-    Condition: EnableQrts
-    Properties:
-      Description: Track queue depth alarm state
-      EventPattern:
-        source: [aws.cloudwatch]
-        detail-type: [CloudWatch Alarm State Change]
-        resources:
-          - !GetAtt queueDepthAlarm.Arn
-        detail:
-          state:
-            value: [ALARM]
-      Targets:
-        - Arn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-scheduler-handler-s3-changelog-qrts'
-          Id: event-handler
-          Input: !Sub >
-            {
-              "bucket_name": "${BucketName}",
-              "queue_url": "${queue}",
-              "queue_name": "${queue.QueueName}"
-            }
-
-  queueDepthAlarmPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-scheduler-handler-s3-changelog-qrts'
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt queueDepthAlarmSubscription.Arn
 
   queueOldestMessageAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: EnableQrts
     Properties:
-      AlarmDescription: Alarm if the age of the oldest massage is too big.
+      AlarmDescription: !Sub Alarm if the age of the oldest massage is greater than ${QrtsMaxDelay} seconds.
       ActionsEnabled: false
       Namespace: AWS/SQS
       MetricName: ApproximateAgeOfOldestMessage
@@ -212,18 +200,19 @@ Resources:
       Statistic: Maximum
       Period: 60
       EvaluationPeriods: 1
-      Threshold: 600 # 10 minutes
+      Threshold: !Ref QrtsMaxDelay
       ComparisonOperator: GreaterThanThreshold
 
-  queueOldestMessageAlarmSubscription:
+  alarmSubscription:
     Type: AWS::Events::Rule
     Condition: EnableQrts
     Properties:
-      Description: Track queue oldest message alarm state
+      Description: Track S3 changelog alarms state change
       EventPattern:
         source: [aws.cloudwatch]
         detail-type: [CloudWatch Alarm State Change]
         resources:
+          - !GetAtt queueDepthAlarm.Arn
           - !GetAtt queueOldestMessageAlarm.Arn
         detail:
           state:
@@ -237,14 +226,6 @@ Resources:
               "queue_url": "${queue}",
               "queue_name": "${queue.QueueName}"
             }
-
-  queueOldestMessageAlarmPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-scheduler-handler-s3-changelog-qrts'
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt queueOldestMessageAlarmSubscription.Arn
 
   scanExistingObjectsCustom:
     Type: Custom::ScanExistingObjects

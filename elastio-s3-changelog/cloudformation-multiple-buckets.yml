@@ -23,15 +23,32 @@ Parameters:
     AllowedValues: ['true', 'false']
     Default: 'false'
     Description: >
-      If set to true, enables quasi-realtime scanning.
-      If set to false, disables quasi-realtime scanning.
+      If set to true, enables quasi-realtime scanning (QRTS).
+      If set to false, disables QRTS.
+
+  QrtsBatchSize:
+    Type: Number
+    Default: 100
+    MinValue: 0
+    Description: >
+      Defines the number of S3 object updates that will be buffered in the queue before the scan job will be triggered.
+      The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
+
+  QrtsMaxDelay:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    Description: >
+      Defines the maximum delay in seconds between the object update and its scan.
+      The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
 
   KeyPrefixes:
     Type: CommaDelimitedList
     AllowedPattern: ^([^/\s]+/)*$
     ConstraintDescription: Prefixes must end (but not start) with '/'.
     Description: >
-      Comma-delimited list of prefixes of objects to scan. If empty, all objects will be scanned.
+      Comma-delimited list of prefixes of objects to scan. Note that, unless QRTS is enabled, paths selector
+      in the Protection Policy will also be used to filter objects before scanning.
       Example: xyz/, foo/bar/
 
 Resources:
@@ -43,4 +60,4 @@ Resources:
         ScanExistingObjects: !Ref ScanExistingObjects
         EnableQrts: !Ref EnableQrts
         KeyPrefixes: !Join [',', !Ref KeyPrefixes]
-      TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-nested.yaml
+      TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-multiple-buckets-with-macros.yaml

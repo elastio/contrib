@@ -16,10 +16,10 @@ Parameters:
     Default: 'false'
   QrtsBatchSize:
     Type: Number
-    Default: 100
+    Default: 0
   QrtsMaxDelay:
     Type: Number
-    Default: 300
+    MinValue: 60
   KeyPrefixes:
     Type: String
 Resources:

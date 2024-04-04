@@ -18,6 +18,15 @@ Parameters:
       If set to true, the full initial scan of the bucket will be performed.
       If set to false, only new objects in the bucket will be scanned.
 
+  KeyPrefixes:
+    Type: CommaDelimitedList
+    AllowedPattern: ^([^/\s]+/)*$
+    ConstraintDescription: Prefixes must end (but not start) with '/'.
+    Description: >
+      Comma-delimited list of prefixes of objects to scan. Note that, unless QRTS is enabled, paths selector
+      in the Protection Policy will also be used to filter objects before scanning.
+      Example: xyz/, foo/bar/
+
   EnableQrts:
     Type: String
     AllowedValues: ['true', 'false']
@@ -42,14 +51,19 @@ Parameters:
       Defines the maximum delay in seconds between the object update and its scan.
       The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
 
-  KeyPrefixes:
-    Type: CommaDelimitedList
-    AllowedPattern: ^([^/\s]+/)*$
-    ConstraintDescription: Prefixes must end (but not start) with '/'.
-    Description: >
-      Comma-delimited list of prefixes of objects to scan. Note that, unless QRTS is enabled, paths selector
-      in the Protection Policy will also be used to filter objects before scanning.
-      Example: xyz/, foo/bar/
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Main Parameters" }
+        Parameters:
+          - BucketNames
+          - ScanExistingObjects
+          - KeyPrefixes
+      - Label: { default: "Experimental Parameters" }
+        Parameters:
+          - EnableQrts
+          - QrtsBatchSize
+          - QrtsMaxDelay
 
 Resources:
   stack:

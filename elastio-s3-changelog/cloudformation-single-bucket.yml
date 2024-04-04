@@ -15,6 +15,16 @@ Parameters:
       If set to true, the full initial scan of the bucket will be performed.
       If set to false, only new objects in the bucket will be scanned.
 
+  KeyPrefixes:
+    # Unfortunately, it's impossible to pass CommaDelimitedList to a nested stack,
+    # so we have to use String here, and then split it manually.
+    Type: String
+    AllowedPattern: ^(([^/,\s]+/)+)(,([^/,\s]+/)+)*$|^$
+    ConstraintDescription: Prefixes must end (but not start) with '/', and cannot contain spaces.
+    Description: >
+      Comma-delimited list of prefixes of objects to scan. Note that, unless QRTS is enabled, paths selector
+      in the Protection Policy will also be used to filter objects before scanning.
+
   EnableQrts:
     Type: String
     AllowedValues: ['true', 'false']
@@ -26,7 +36,7 @@ Parameters:
   QrtsBatchSize:
     Type: Number
     Default: 100
-    MinValue: 1
+    MinValue: 0
     Description: >
       Defines the number of S3 object updates that will be buffered in the queue before the scan job will be triggered.
       The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
@@ -34,20 +44,24 @@ Parameters:
   QrtsMaxDelay:
     Type: Number
     Default: 300
-    MinValue: 1
+    MinValue: 60
     Description: >
       Defines the maximum delay in seconds between the object update and its scan.
       The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
 
-  KeyPrefixes:
-    # Unfortunately, it's impossible to pass CommaDelimitedList to a nested stack,
-    # so we have to use String here, and then split it manually.
-    Type: String
-    AllowedPattern: ^(([^/,\s]+/)+)(,([^/,\s]+/)+)*$|^$
-    ConstraintDescription: Prefixes must end (but not start) with '/', and cannot contain spaces.
-    Description: >
-      Comma-delimited list of prefixes of objects to scan. Note that, unless QRTS is enabled, paths selector
-      in the Protection Policy will also be used to filter objects before scanning.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Main Parameters" }
+        Parameters:
+          - BucketName
+          - ScanExistingObjects
+          - KeyPrefixes
+      - Label: { default: "Experimental Parameters" }
+        Parameters:
+          - EnableQrts
+          - QrtsBatchSize
+          - QrtsMaxDelay
 
 Conditions:
   ScanExistingObjects: !Equals [!Ref ScanExistingObjects, 'true']
@@ -59,7 +73,7 @@ Resources:
     Type: AWS::SQS::Queue
     Properties:
       MessageRetentionPeriod: 1209600 # 14 days
-      VisibilityTimeout: 43200 # 12 hours
+      VisibilityTimeout: 3600 # 1 hour
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt dlq.Arn
         maxReceiveCount: 3
@@ -118,14 +132,11 @@ Resources:
           Id: changelog-queue
           InputTransformer:
             InputPathsMap:
-              key: '$.detail.object.key'
-              type: '$.detail-type'
+              data: '$'
             InputTemplate:
               '{
-                "objects": [{
-                  "key": <key>,
-                  "event_type": <type>
-                }]
+                "kind": "S3Update",
+                "data": <data>
               }'
 
   queueInlinePolicy:
@@ -207,7 +218,7 @@ Resources:
     Type: AWS::Events::Rule
     Condition: EnableQrts
     Properties:
-      Description: Track S3 changelog alarms state change
+      Description: Track S3 changelog Cloudwatch alarms state change for QRTS
       EventPattern:
         source: [aws.cloudwatch]
         detail-type: [CloudWatch Alarm State Change]

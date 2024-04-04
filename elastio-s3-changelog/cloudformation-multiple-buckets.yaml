@@ -73,5 +73,7 @@ Resources:
         BucketNames: !Join [',', !Ref BucketNames]
         ScanExistingObjects: !Ref ScanExistingObjects
         EnableQrts: !Ref EnableQrts
+        QrtsBatchSize: !Ref QrtsBatchSize
+        QrtsMaxDelay: !Ref QrtsMaxDelay
         KeyPrefixes: !Join [',', !Ref KeyPrefixes]
       TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-multiple-buckets-with-macros.yaml

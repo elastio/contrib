@@ -22,8 +22,9 @@ Parameters:
     AllowedPattern: ^(([^/,\s]+/)+)(,([^/,\s]+/)+)*$|^$
     ConstraintDescription: Prefixes must end (but not start) with '/', and cannot contain spaces.
     Description: >
-      Comma-delimited list of prefixes of objects to scan. Note that, unless QRTS is enabled, paths selector
-      in the Protection Policy will also be used to filter objects before scanning.
+      Comma-delimited list of prefixes of objects to scan. Can be empty. Note that, unless QRTS (experimental)
+      is enabled, paths selector in the Protection Policy will also be used to filter objects before scanning.
+      Example: xyz/,foo/bar/
 
   EnableQrts:
     Type: String
@@ -38,6 +39,7 @@ Parameters:
     Default: 100
     MinValue: 0
     Description: >
+      [Ignored unless `EnableQrts` is `true`].
       Defines the number of S3 object updates that will be buffered in the queue before the scan job will be triggered.
       The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
 
@@ -46,6 +48,7 @@ Parameters:
     Default: 300
     MinValue: 60
     Description: >
+      [Ignored unless `EnableQrts` is `true`].
       Defines the maximum delay in seconds between the object update and its scan.
       The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
 

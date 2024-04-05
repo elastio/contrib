@@ -9,32 +9,46 @@ permissions:
 concurrency:
   cancel-in-progress: false
   group: "${{ github.workflow }}-${{ github.ref }}"
+env:
+  AWS_REGION: us-east-2
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ci: "${{ steps.filter.outputs.ci }}"
+      aws-backup-elastio-integration: "${{ steps.filter.outputs.aws-backup-elastio-integration }}"
+      elastio-s3-changelog: "${{ steps.filter.outputs.elastio-s3-changelog }}"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Check if files were modified
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            ci:
+              - '.github/workflows/**'
+            aws-backup-elastio-integration:
+              - 'aws-backup-elastio-integration/**'
+            elastio-s3-changelog:
+              - 'elastio-s3-changelog/**'
   upload-aws-backup-elastio-integration:
     runs-on:
       - ubuntu-latest
+    needs: changes
+    if: >-
+      needs.changes.outputs.aws-backup-elastio-integration == 'true' ||
+      needs.changes.outputs.ci == 'true'
     steps:
       - name: Checkout repository
-        uses: "actions/checkout@v3"
-        with:
-          fetch-depth: '30'
-          token: "${{ secrets.SECRET_TOKEN }}"
-      - name: Check if files were modified
-        id: changes
-        uses: "dorny/paths-filter@v2"
-        with:
-          filters: |
-            filechange:
-              - 'aws-backup-elastio-integration/**'
+        uses: actions/checkout@v4
       - name: Configure AWS credentials
-        if: "steps.changes.outputs.filechange == 'true'"
-        uses: "aws-actions/configure-aws-credentials@v3"
+        uses: "aws-actions/configure-aws-credentials@v4"
         with:
-          aws-region: "us-east-2"
+          aws-region: ${{ env.AWS_REGION }}
           role-to-assume: "arn:aws:iam::537513441174:role/Github-Actions-Contrib-OIDC-Role"
           special-characters-workaround: 'true'
       - name: Upload lambda and cfn to bucket
-        if: "steps.changes.outputs.filechange == 'true'"
         env:
           NAME: aws-backup-elastio-integration
           CFN_NAME: Elastio_stack.yaml
@@ -46,3 +60,33 @@ jobs:
           cd ${NAME}
           zip ${NAME}.zip lambda_handler.py
           aws s3 cp ${NAME}.zip s3://${S3_BUCKET}/${S3_KEY}/${NAME}.zip
+  upload-elastio-s3-changelog:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: >-
+      needs.changes.outputs.elastio-s3-changelog == 'true' ||
+      needs.changes.outputs.ci == 'true'
+    env:
+      S3_BUCKET: elastio-prod-artifacts-us-east-2
+      S3_PREFIX: contrib
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.aws_elastio_prod_artifacts_contrib_role_arn }}
+      - name: Update version in template
+        run: |
+          version=$(cat elastio-s3-changelog/version)
+          echo "TEMPLATE_VERSION=${version}" >> "$GITHUB_ENV"
+
+          sed -i elastio-s3-changelog/*.yaml \
+            -e "s/{{REGION}}/${AWS_REGION}/g" \
+            -e "s/{{BUCKET}}/${S3_BUCKET}/g" \
+            -e "s/{{PREFIX}}/${S3_PREFIX}/g" \
+            -e "s/{{VERSION}}/${version}/g"
+      - name: Upload to S3
+        run: |
+          aws s3 cp --recursive elastio-s3-changelog/* \
+            "s3://${S3_BUCKET}/${S3_PREFIX}/${TEMPLATE_VERSION}/"

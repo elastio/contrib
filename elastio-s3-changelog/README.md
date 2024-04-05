@@ -12,7 +12,7 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 1. First, you need to enable Amazon EventBridge for your S3 buckets by following these instructions:
     [Enabling Amazon EventBridge](https://docs.aws.amazon.com/AmazonS3/latest/userguide/enable-event-notifications-eventbridge.html).
 2. You can use
-    [this quick-create link](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    [this quick-create link](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/v1/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
     to create the stack.
 
     > You might need to switch to the region where your Elastio CloudFormation stack is deployed.

@@ -78,4 +78,8 @@ Resources:
         QrtsBatchSize: !Ref QrtsBatchSize
         QrtsMaxDelay: !Ref QrtsMaxDelay
         KeyPrefixes: !Join [',', !Ref KeyPrefixes]
-      TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-multiple-buckets-with-macros.yaml
+      TemplateURL: https://{{BUCKET}}.s3.{{REGION}}.amazonaws.com/{{PREFIX}}/{{VERSION}}/cloudformation-multiple-buckets-with-macros.yaml
+
+Outputs:
+  templateVersion:
+    Value: "{{VERSION}}"

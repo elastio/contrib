@@ -36,4 +36,7 @@ Resources:
             QrtsBatchSize: !Ref QrtsBatchSize
             QrtsMaxDelay: !Ref QrtsMaxDelay
             KeyPrefixes: !Ref KeyPrefixes
-          TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-single-bucket.yaml
+          TemplateURL: https://{{BUCKET}}.s3.{{REGION}}.amazonaws.com/{{PREFIX}}/{{VERSION}}/cloudformation-single-bucket.yaml
+Outputs:
+  templateVersion:
+    Value: "{{VERSION}}"

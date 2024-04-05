@@ -14,7 +14,7 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 2. You can use
     [this quick-create link](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/v1/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
     to create the stack.
-    
+
     > You might need to switch to the region where your Elastio CloudFormation stack is deployed.
 
     >**Important!** You can change the stack name, but it **MUST** start with `elastio-`. Otherwise, Elastio won't be able to access the created resources.

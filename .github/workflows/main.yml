@@ -88,5 +88,5 @@ jobs:
             -e "s/{{VERSION}}/${version}/g"
       - name: Upload to S3
         run: |
-          aws s3 cp --recursive elastio-s3-changelog/* \
+          aws s3 cp --recursive ./elastio-s3-changelog \
             "s3://${S3_BUCKET}/${S3_PREFIX}/${TEMPLATE_VERSION}/"

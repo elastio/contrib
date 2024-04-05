@@ -45,6 +45,11 @@ sed -i ./*.yaml \
 
 aws s3 cp --recursive ./ "s3://${S3_BUCKET}/${s3_prefix}/${version}/"
 
+# Skip opening the link if we're in CI
+if [[ ! -v CI ]]; then
+    exit 0
+fi
+
 cfn_deep_link_parts=(
     "https://$AWS_REGION.console.aws.amazon.com/cloudformation/home"
     "?region=$AWS_REGION#/stacks/create/review?templateURL="

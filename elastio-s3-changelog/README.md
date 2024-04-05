@@ -12,23 +12,25 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 1. First, you need to enable Amazon EventBridge for your S3 buckets by following these instructions:
     [Enabling Amazon EventBridge](https://docs.aws.amazon.com/AmazonS3/latest/userguide/enable-event-notifications-eventbridge.html).
 2. You can use
-    [this quick-create link](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/v1/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    [this quick-create link](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
     to create the stack.
 
     > You might need to switch to the region where your Elastio CloudFormation stack is deployed.
 
-    >**Important!** You can change the stack name, but it **MUST** start with `elastio-`. Otherwise, Elastio won't be able to access the created resources.
+    > **Important!** You can change the stack name, but it **MUST** start with `elastio-`. Otherwise, Elastio won't be able to access the created resources.
 
-3. Fill in the parameters:
+3. Fill in the main parameters:
     * *BucketNames* - comma-separated list of S3 bucket names;
+
     * *ScanExistingObjects* - set to `true` if you want to perform the initial scan of all objects in the bucket(s);
+
     * *KeyPrefixes* - comma-separated list of prefixes of objects to scan. This will be applied to all buckets.
         If you want to use different prefixes for different buckets, you need to deploy multiple S3 Changelog stacks.
-        Also note that the paths selector in the Protection Policy will also be used to filter objects before scanning.
+        Also, note that the paths selector in the Protection Policy will also be used to filter objects before scanning.
         This means that the *KeyPrefixes* parameter must be in sync with the paths selector in the Protection Policy,
         or not specified at all.
 
-    > There are also some experimental parameters in the template, you can ignore them.
+    > There are also some advanced and experimental parameters in the template, you can ignore them.
 
 4. Check the box in front of `I acknowledge that AWS CloudFormation might create IAM resources with custom names`
     and `I acknowledge that AWS CloudFormation might require the following capability: CAPABILITY_AUTO_EXPAND`

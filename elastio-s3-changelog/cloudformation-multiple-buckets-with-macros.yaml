@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/goformation/master/schema/cloudformation.schema.json
+
 # This file is not intended to be used on its own. It exists to work around a limitation in CloudFormation,
 # which prevents updating the CFN stack containing Fn::ForEach in the AWS console. This is because internally,
 # CFN stores the template after resolving macros, so changing the input parameters has no effect.
@@ -11,6 +13,9 @@ Parameters:
   ScanExistingObjects:
     Type: String
     Default: 'false'
+  EnableDlq:
+    Type: String
+    Default: 'true'
   EnableQrts:
     Type: String
     Default: 'false'
@@ -32,11 +37,12 @@ Resources:
           Parameters:
             BucketName: !Ref BucketName
             ScanExistingObjects: !Ref ScanExistingObjects
+            EnableDlq: !Ref EnableDlq
             EnableQrts: !Ref EnableQrts
             QrtsBatchSize: !Ref QrtsBatchSize
             QrtsMaxDelay: !Ref QrtsMaxDelay
             KeyPrefixes: !Ref KeyPrefixes
-          TemplateURL: https://{{BUCKET}}.s3.{{REGION}}.amazonaws.com/{{PREFIX}}/{{VERSION}}/cloudformation-single-bucket.yaml
+          TemplateURL: https://{{S3_BUCKET}}.s3.{{AWS_REGION}}.amazonaws.com/{{S3_PREFIX}}/{{VERSION}}/cloudformation-single-bucket.yaml
 Outputs:
   templateVersion:
     Value: "{{VERSION}}"

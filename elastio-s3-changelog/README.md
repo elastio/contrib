@@ -17,11 +17,11 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 
     > You might need to switch to the region where your Elastio CloudFormation stack is deployed.
 
-    >**Important!** If you want to change the stack name, make sure it starts from `elastio-`. Otherwise, Elastio won't be able to access the created resources.
+    >**Important!** You can change the stack name, but it **MUST** start with `elastio-`. Otherwise, Elastio won't be able to access the created resources.
 
 3. Fill in the parameters:
     * *BucketNames* - comma-separated list of S3 bucket names;
-    * *ScanExistingObjects* - set to `true` if you want to perform the initial scan of all objects in the buckets;
+    * *ScanExistingObjects* - set to `true` if you want to perform the initial scan of all objects in the bucket(s);
     * *KeyPrefixes* - comma-separated list of prefixes of objects to scan. This will be applied to all buckets.
         If you want to use different prefixes for different buckets, you need to deploy multiple S3 Changelog stacks.
         Also note that the paths selector in the Protection Policy will also be used to filter objects before scanning.
@@ -30,7 +30,7 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 
     > There are also some experimental parameters in the template, you can ignore them.
 
-4. Check the checkmarks in front of `I acknowledge that AWS CloudFormation might create IAM resources with custom names`
+4. Check the box in front of `I acknowledge that AWS CloudFormation might create IAM resources with custom names`
     and `I acknowledge that AWS CloudFormation might require the following capability: CAPABILITY_AUTO_EXPAND`
     and click `Create stack`.
 

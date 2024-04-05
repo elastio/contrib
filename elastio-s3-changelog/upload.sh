@@ -46,7 +46,7 @@ sed -i ./*.yaml \
 aws s3 cp --recursive ./ "s3://${S3_BUCKET}/${s3_prefix}/${version}/"
 
 # Skip opening the link if we're in CI
-if [[ ! -v CI ]]; then
+if [[ -v CI ]]; then
     exit 0
 fi
 

@@ -1,0 +1,39 @@
+# This file is not intended to be used on its own. It exists to work around a limitation in CloudFormation,
+# which prevents updating the CFN stack containing Fn::ForEach in the AWS console. This is because internally,
+# CFN stores the template after resolving macros, so changing the input parameters has no effect.
+# Related issue: https://github.com/aws-cloudformation/cfn-language-discussion/issues/146
+AWSTemplateFormatVersion: "2010-09-09"
+Transform:
+  - AWS::LanguageExtensions # for the Fn::ForEach function
+Parameters:
+  BucketNames:
+    Type: String
+  ScanExistingObjects:
+    Type: String
+    Default: 'false'
+  EnableQrts:
+    Type: String
+    Default: 'false'
+  QrtsBatchSize:
+    Type: Number
+    Default: 0
+  QrtsMaxDelay:
+    Type: Number
+    MinValue: 60
+  KeyPrefixes:
+    Type: String
+Resources:
+  'Fn::ForEach::Stacks':
+    - BucketName
+    - !Split [',', !Ref BucketNames]
+    - 'stack&{BucketName}':
+        Type: AWS::CloudFormation::Stack
+        Properties:
+          Parameters:
+            BucketName: !Ref BucketName
+            ScanExistingObjects: !Ref ScanExistingObjects
+            EnableQrts: !Ref EnableQrts
+            QrtsBatchSize: !Ref QrtsBatchSize
+            QrtsMaxDelay: !Ref QrtsMaxDelay
+            KeyPrefixes: !Ref KeyPrefixes
+          TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-single-bucket.yaml

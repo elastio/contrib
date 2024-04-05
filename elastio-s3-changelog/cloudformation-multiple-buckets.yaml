@@ -1,0 +1,81 @@
+# This template allows to enable the S3 changelog for multiple buckets.
+# It deploys one nested stack per bucket.
+AWSTemplateFormatVersion: "2010-09-09"
+Parameters:
+  BucketNames:
+    Type: CommaDelimitedList
+    AllowedPattern: .{3,}
+    ConstraintDescription: Bucket name must be at least 3 characters long.
+    Description: >
+      Comma-delimited list of S3 bucket names.
+      Example: examplebucket1, examplebucket2
+
+  ScanExistingObjects:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      If set to true, the full initial scan of the bucket will be performed.
+      If set to false, only new objects in the bucket will be scanned.
+
+  KeyPrefixes:
+    Type: CommaDelimitedList
+    AllowedPattern: ^([^/\s]+/)*$
+    ConstraintDescription: Prefixes must end (but not start) with '/'.
+    Description: >
+      Comma-delimited list of prefixes of objects to scan. Can be empty. Note that, unless QRTS (experimental)
+      is enabled, paths selector in the Protection Policy will also be used to filter objects before scanning.
+      Example: xyz/, foo/bar/
+
+  EnableQrts:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      If set to true, enables quasi-realtime scanning (QRTS).
+      If set to false, disables QRTS.
+
+  QrtsBatchSize:
+    Type: Number
+    Default: 100
+    MinValue: 0
+    Description: >
+      [Ignored unless `EnableQrts` is `true`].
+      Defines the number of S3 object updates that will be buffered in the queue before the scan job will be triggered.
+      The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
+
+  QrtsMaxDelay:
+    Type: Number
+    Default: 300
+    MinValue: 60
+    Description: >
+      [Ignored unless `EnableQrts` is `true`].
+      Defines the maximum delay in seconds between the object update and its scan.
+      The lower this value is - the closer to real-time scanning you get, and the more expensive it becomes.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Main Parameters" }
+        Parameters:
+          - BucketNames
+          - ScanExistingObjects
+          - KeyPrefixes
+      - Label: { default: "Experimental Parameters" }
+        Parameters:
+          - EnableQrts
+          - QrtsBatchSize
+          - QrtsMaxDelay
+
+Resources:
+  stack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        BucketNames: !Join [',', !Ref BucketNames]
+        ScanExistingObjects: !Ref ScanExistingObjects
+        EnableQrts: !Ref EnableQrts
+        QrtsBatchSize: !Ref QrtsBatchSize
+        QrtsMaxDelay: !Ref QrtsMaxDelay
+        KeyPrefixes: !Join [',', !Ref KeyPrefixes]
+      TemplateURL: https://elastio-artifacts-kskorokhodov-us-east-2.s3.us-east-2.amazonaws.com/cloudformation-multiple-buckets-with-macros.yaml

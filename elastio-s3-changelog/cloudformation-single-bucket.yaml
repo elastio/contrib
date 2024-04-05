@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/goformation/master/schema/cloudformation.schema.json
+
 # This template enables the S3 changelog for a single bucket.
 AWSTemplateFormatVersion: "2010-09-09"
 Parameters:
@@ -25,6 +27,14 @@ Parameters:
       Comma-delimited list of prefixes of objects to scan. Can be empty. Note that, unless QRTS (experimental)
       is enabled, paths selector in the Protection Policy will also be used to filter objects before scanning.
       Example: xyz/,foo/bar/
+
+  EnableDlq:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: >
+      If set to true, enables the Dead Letter Queue (DLQ) for the changelog queue.
+      If set to false, disables the DLQ.
 
   EnableQrts:
     Type: String
@@ -55,12 +65,17 @@ Parameters:
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
-      - Label: { default: "Main Parameters" }
+      - Label: { default: Main Parameters }
         Parameters:
           - BucketName
           - ScanExistingObjects
           - KeyPrefixes
-      - Label: { default: "Experimental Parameters" }
+
+      - Label: { default: Advanced Parameters }
+        Parameters:
+          - EnableDlq
+
+      - Label: { default: Experimental Parameters }
         Parameters:
           - EnableQrts
           - QrtsBatchSize
@@ -68,6 +83,7 @@ Metadata:
 
 Conditions:
   ScanExistingObjects: !Equals [!Ref ScanExistingObjects, 'true']
+  EnableDlq: !Equals [!Ref EnableDlq, 'true']
   EnableQrts: !Equals [!Ref EnableQrts, 'true']
   NoKeyPrefixes: !Equals [!Ref KeyPrefixes, '']
 
@@ -77,9 +93,12 @@ Resources:
     Properties:
       MessageRetentionPeriod: 1209600 # 14 days
       VisibilityTimeout: 3600 # 1 hour
-      RedrivePolicy:
-        deadLetterTargetArn: !GetAtt dlq.Arn
-        maxReceiveCount: 3
+      RedrivePolicy: !If
+        - EnableDlq
+        - deadLetterTargetArn: !GetAtt dlq.Arn
+          maxReceiveCount: 3
+        - !Ref AWS::NoValue
+
       Tags:
         - Key: elastio:resource
           Value: 'true'
@@ -90,6 +109,7 @@ Resources:
 
   dlq:
     Type: AWS::SQS::Queue
+    Condition: EnableDlq
     Properties:
       MessageRetentionPeriod: 1209600
       VisibilityTimeout: 30
@@ -103,7 +123,6 @@ Resources:
 
   eventRule:
     Type: AWS::Events::Rule
-    DependsOn: queue
     Properties:
       Description: !Sub Track S3 object change events in ${BucketName}
       EventPattern: !If
@@ -252,9 +271,16 @@ Resources:
       KeyPrefixes: !Ref KeyPrefixes
 
 Outputs:
+  eventRuleArn:
+    Value: !GetAtt eventRule.Arn
+  queueName:
+    Value: !GetAtt queue.QueueName
+  queueUrl:
+    Value: !GetAtt queue.QueueUrl
   queueArn:
     Value: !GetAtt queue.Arn
   dlqArn:
+    Condition: EnableDlq
     Value: !GetAtt dlq.Arn
   templateVersion:
     Value: "{{VERSION}}"

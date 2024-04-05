@@ -68,7 +68,6 @@ jobs:
       needs.changes.outputs.ci == 'true'
     env:
       S3_BUCKET: elastio-prod-artifacts-us-east-2
-      S3_PREFIX: contrib
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -76,17 +75,5 @@ jobs:
         with:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ vars.aws_elastio_prod_artifacts_contrib_role_arn }}
-      - name: Update version in template
-        run: |
-          version=$(cat elastio-s3-changelog/version)
-          echo "TEMPLATE_VERSION=${version}" >> "$GITHUB_ENV"
 
-          sed -i elastio-s3-changelog/*.yaml \
-            -e "s/{{REGION}}/${AWS_REGION}/g" \
-            -e "s/{{BUCKET}}/${S3_BUCKET}/g" \
-            -e "s/{{PREFIX}}/${S3_PREFIX}/g" \
-            -e "s/{{VERSION}}/${version}/g"
-      - name: Upload to S3
-        run: |
-          aws s3 cp --recursive ./elastio-s3-changelog \
-            "s3://${S3_BUCKET}/${S3_PREFIX}/${TEMPLATE_VERSION}/"
+      - run: ./elastio-s3-changelog/upload.sh

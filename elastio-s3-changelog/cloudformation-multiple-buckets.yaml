@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/goformation/master/schema/cloudformation.schema.json
+
 # This template allows to enable the S3 changelog for multiple buckets.
 # It deploys one nested stack per bucket.
 AWSTemplateFormatVersion: "2010-09-09"
@@ -26,6 +28,14 @@ Parameters:
       Comma-delimited list of prefixes of objects to scan. Can be empty. Note that, unless QRTS (experimental)
       is enabled, paths selector in the Protection Policy will also be used to filter objects before scanning.
       Example: xyz/, foo/bar/
+
+  EnableDlq:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+    Description: >
+      If set to true, enables the Dead Letter Queue (DLQ) for the changelog queue.
+      If set to false, disables the DLQ.
 
   EnableQrts:
     Type: String
@@ -61,6 +71,11 @@ Metadata:
           - BucketNames
           - ScanExistingObjects
           - KeyPrefixes
+
+      - Label: { default: Advanced Parameters }
+        Parameters:
+          - EnableDlq
+
       - Label: { default: "Experimental Parameters" }
         Parameters:
           - EnableQrts
@@ -74,11 +89,12 @@ Resources:
       Parameters:
         BucketNames: !Join [',', !Ref BucketNames]
         ScanExistingObjects: !Ref ScanExistingObjects
+        EnableDlq: !Ref EnableDlq
         EnableQrts: !Ref EnableQrts
         QrtsBatchSize: !Ref QrtsBatchSize
         QrtsMaxDelay: !Ref QrtsMaxDelay
         KeyPrefixes: !Join [',', !Ref KeyPrefixes]
-      TemplateURL: https://{{BUCKET}}.s3.{{REGION}}.amazonaws.com/{{PREFIX}}/{{VERSION}}/cloudformation-multiple-buckets-with-macros.yaml
+      TemplateURL: https://{{S3_BUCKET}}.s3.{{AWS_REGION}}.amazonaws.com/{{S3_PREFIX}}/{{VERSION}}/cloudformation-multiple-buckets-with-macros.yaml
 
 Outputs:
   templateVersion:

@@ -48,21 +48,37 @@ Resources:
         ZipFile: |
           import boto3
           import os
-
+          
           def lambda_handler(event, context):
-              response_elements = event.get('detail', {}).get('responseElements', {})
-              resource_id = response_elements.get('snapshotId')
+              print("event:",event)
               
-              ec2_client = boto3.client('ec2')
-
-              snapshot_tags = ec2_client.describe_tags(Filters=[{'Name': 'resource-id', 'Values': [resource_id]}])['Tags']
-              
-              tag_key_to_monitor = os.environ.get('TagKeyToMonitor') 
-              elastio_action_tag_value = os.environ.get('ElastioActionTagValue') 
-              
+              tag_key_to_monitor = os.environ.get('TagKeyToMonitor')
+              elastio_action_tag_value = os.environ.get('ElastioActionTagValue')
               tag_keys_to_monitor = [tag.strip() for tag in tag_key_to_monitor.split(',')]
               
-              if any(tag['Key'] in tag_keys_to_monitor for tag in snapshot_tags):
+              ec2_client = boto3.client('ec2')
+              
+              detail = event['detail']
+              
+              print("detail:",detail)
+              print("tag_keys_to_monitor:",tag_keys_to_monitor)
+              
+              try:
+                  resource_id = detail['responseElements']['snapshotId']
+              except:
+                  print("snapshotId is null")
+          
+              try:
+                  resource_id = detail['responseElements']['imageId']
+              except:
+                  print("ImageId is null")
+                  
+              resource_tags = ec2_client.describe_tags(Filters=[{'Name': 'resource-id', 'Values': [resource_id]}])['Tags']
+                  
+              print("resource_id:",resource_id)
+              print("resource_tags:",resource_tags)
+                      
+              if any(tag['Key'] in tag_keys_to_monitor for tag in resource_tags):
                   ec2_client.create_tags(Resources=[resource_id], Tags=[{'Key': 'elastio:action', 'Value': elastio_action_tag_value}])
 
   CloudWatchEventRule:
@@ -76,6 +92,7 @@ Resources:
         detail:
           eventName:
             - "CreateSnapshot"
+            - "CreateImage"
       Targets:
         - Arn: !GetAtt LambdaFunction.Arn
           Id: "TargetFunctionV1"

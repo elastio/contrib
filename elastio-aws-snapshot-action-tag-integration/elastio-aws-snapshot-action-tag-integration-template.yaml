@@ -31,6 +31,7 @@ Resources:
                 Action:
                   - "ec2:CreateTags"
                   - "ec2:DescribeTags"
+                  - "ec2:DescribeImages"
                 Resource: "*"
 
   LambdaFunction:
@@ -48,22 +49,34 @@ Resources:
         ZipFile: |
           import boto3
           import os
-
+          
           def lambda_handler(event, context):
-              response_elements = event.get('detail', {}).get('responseElements', {})
-              resource_id = response_elements.get('snapshotId')
+              print("event:",event)
+              
+              elastio_action_tag_value = os.environ.get('ElastioActionTagValue')
+              tag_keys_to_monitor = [tag.strip() for tag in os.environ.get('TagKeyToMonitor').split(',')]
               
               ec2_client = boto3.client('ec2')
-
-              snapshot_tags = ec2_client.describe_tags(Filters=[{'Name': 'resource-id', 'Values': [resource_id]}])['Tags']
               
-              tag_key_to_monitor = os.environ.get('TagKeyToMonitor') 
-              elastio_action_tag_value = os.environ.get('ElastioActionTagValue') 
+              image_id = event['detail']['ImageId']
               
-              tag_keys_to_monitor = [tag.strip() for tag in tag_key_to_monitor.split(',')]
+              image_info = ec2_client.describe_images(ImageIds=[image_id])['Images'][0]
+              block_device_mappings = image_info.get('BlockDeviceMappings', [])
               
-              if any(tag['Key'] in tag_keys_to_monitor for tag in snapshot_tags):
-                  ec2_client.create_tags(Resources=[resource_id], Tags=[{'Key': 'elastio:action', 'Value': elastio_action_tag_value}])
+              print("image_id:",image_id)
+              print("image_info:",image_info)
+              
+              snapshot_ids = [mapping['Ebs']['SnapshotId'] for mapping in block_device_mappings if 'Ebs' in mapping]
+              
+              print("snapshot_ids:",snapshot_ids)
+              
+              for snapshot_id in snapshot_ids:
+                  snapshot_tags = ec2_client.describe_tags(Filters=[{'Name': 'resource-id', 'Values': [snapshot_id]}])['Tags']
+                  
+                  print("snapshot_tags:",snapshot_tags)
+                  
+                  if any(tag['Key'] in tag_keys_to_monitor for tag in snapshot_tags):
+                      ec2_client.create_tags(Resources=[snapshot_id], Tags=[{'Key': 'elastio:action', 'Value': elastio_action_tag_value}])
 
   CloudWatchEventRule:
     Type: "AWS::Events::Rule"
@@ -72,10 +85,11 @@ Resources:
         source:
           - "aws.ec2"
         detail-type:
-          - "AWS API Call via CloudTrail"
+          - EC2 AMI State Change
         detail:
-          eventName:
-            - "CreateSnapshot"
+          State:
+            - available
+      State: ENABLED
       Targets:
         - Arn: !GetAtt LambdaFunction.Arn
           Id: "TargetFunctionV1"

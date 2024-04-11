@@ -10,7 +10,7 @@ An encrypted, and compressed copy of your data can be efficiently imported into 
 
 ### AWS Backup restore testing validation
 
-Elastio can scan the resource created as part of AWS Backup restore testing. The temporarily restored resource may be modified by Elastio directly for better performance and optimized cost. For example, Elastio stops the restored EC2 instance, detaches its volumes and attaches them to the worker EC2 instance that performs the scan.
+Elastio can scan the resource created as part of [AWS Backup restore testing](https://docs.aws.amazon.com/aws-backup/latest/devguide/restore-testing.html). The temporarily restored resource may be modified by Elastio directly for better performance and optimized cost. For example, Elastio stops the restored EC2 instance, detaches its volumes and attaches them to the worker EC2 instance that performs the scan.
 
 > ❗Elastio never modifies customer's production data. IAM permissions restrict Elastio to mutating only resources managed by Elastio itself. All such resources have `elastio:resource=true` tag. During regular operation of Elastio all data is treated as sensitive and Elastio can only read and create snapshots of resources. AWS Backup restore testing is an exception where a temporarily restored resource is created and handed to the scanning software to battle-test it.
 
@@ -40,7 +40,6 @@ Elastio connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
   // runs the job worker. For import operations it also determines where Elastio
   // stores the imported RP.
   //
-  //
   // Optional. If omitted or `null` then the default vault is used.
   "elastio_vault": "elastio-vault-name",
 
@@ -62,7 +61,7 @@ Elastio connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
 
   // Options related to scanning.
   //
-  // Optional. If omitted then iscan is disabled. Required only when `action`
+  // Optional. If omitted then scanning is disabled. Required only when `action`
   // is set to `scan`.
   "iscan": {
     // Optional. If omitted then ransomware scan is disabled.
@@ -74,11 +73,11 @@ Elastio connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
     // Name of the event bus scan reports will be written to.
     //
     // Optional. If omitted, the value will be read from an SSM parameter named
-    // `/elastio/iscan-results-eventbridge-bus/`. If that parameter is absent then
+    // `/elastio/iscan-results-eventbridge-bus`. If that parameter is absent then
     // the 'Default' event bus is used.
     "event_bridge_bus": "MyBusName",
 
-    // An opaque string that is simply sent in the resulting `EventBridge` scan
+    // An opaque string that is simply sent in the resulting EventBridge scan
     // results event. This can be used for forwarding custom context from the
     // component that initiates the scan, to the component that processes its results.
     //
@@ -105,7 +104,7 @@ Elastio connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
   // The restored resource is required to be specified. Elastio only reads data
   // from the restored bucket and doesn't modify it.
   //
-  // To assist in efficient scanning of the bucket you can deploy a an S3 changelog
+  // To assist in efficient scanning of the bucket you can deploy an S3 changelog
   // SQS event queue, that Elastio will use to do scanning of the bucket in parallel
   // with its restore process for maximum performance. See details in the paragraph
   // 'Scanning S3 in parallel with restoring'.
@@ -134,9 +133,11 @@ Elastio connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
 
 ### Response
 
+Response is returned in JSON format as described below.
+
 ```jsonc
 {
-  // Describes the AWS Backup rp job that was submitted.
+  // Describes the submitted Elastio job that performs the required action.
   //
   // Required.
   "job_state": { /* See `job_state` description bellow */ },
@@ -147,37 +148,37 @@ The `job_state` is a sum type of two shapes. Either one of them can be returned:
 
 ```jsonc
 {
-    // Serves as a discriminator of this shape.
-    // Indicates that a new background job was started to import the requested AWS Backup RP.
-    //
-    // Required.
-    "kind": "Created",
+  // Serves as a discriminator of this shape.
+  // Indicates that a new background job was started to import the requested AWS Backup RP.
+  //
+  // Required.
+  "kind": "Created",
 
-    // ID of the started Elastio background job.
-    //
-    // Required.
-    "job_id": "j-01ghkcq8g409rxg35x1st6vdzp",
+  // ID of the started Elastio background job.
+  //
+  // Required.
+  "job_id": "j-01ghkcq8g409rxg35x1st6vdzp",
 
-    // Abort token that is used to grant access to aborting the Elastio background job.
-    //
-    // Required.
-    "abort_token": "ew64dYAJt5eXlig4j38zY3K++4OPWomo3tdR/lNxE5I="
+  // Abort token that is used to grant access to aborting the Elastio background job.
+  //
+  // Required.
+  "abort_token": "ew64dYAJt5eXlig4j38zY3K++4OPWomo3tdR/lNxE5I="
 }
 ```
 ```jsonc
 {
-    // Serves as a discriminator of this shape.
-    // Indicates that no new background job was started as a result of this request,
-    // because there is an already running job that does what you need.
-    //
-    // Required.
-    "kind": "Existing",
+  // Serves as a discriminator of this shape.
+  // Indicates that no new background job was started as a result of this request,
+  // because there is an already running job that does what you need.
+  //
+  // Required.
+  "kind": "Existing",
 
-    // ID of the existing Elastio background job that was already in the process of
-    // performing the requested action.
-    //
-    // Required.
-    "job_id": "j-01ghkcq8g409rxg35x1st6vdzp",
+  // ID of the existing Elastio background job that was already in the process of
+  // performing the requested action.
+  //
+  // Required.
+  "job_id": "j-01ghkcq8g409rxg35x1st6vdzp",
 }
 ```
 
@@ -252,7 +253,7 @@ To configure the stack specifically for restore testing you should use the follo
 }
 ```
 
-### Enabling S3 Eventbridge notifications
+### Enabling S3 EventBridge notifications
 
 S3 changelog requires that S3 object change events are reported by the restored bucket to EventBridge. You need to enable them on the bucket before deploying the stack. You can do this by following [these instructions](https://docs.aws.amazon.com/AmazonS3/latest/userguide/enable-event-notifications-eventbridge.html).
 

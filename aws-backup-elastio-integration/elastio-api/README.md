@@ -4,22 +4,22 @@ Elastio connector stack provides JSON API based on AWS Lambda to integrate with 
 
 ## Use cases
 
-### Import an AWS Backup recovery point in an Elastio vault
+### Import an AWS Backup recovery point into an Elastio vault
 
-An encrypted, and compressed copy of your data can be efficiently imported into an Elastio vault. It is treated the same as any other Elastio recovery point created by Elastio itself, meaning that you can restore it, scan it, etc.
+An encrypted and compressed copy of your data can be efficiently imported into an Elastio vault. It is treated the same as any other Elastio recovery point created by Elastio itself, meaning that you can restore it, scan it, etc with Elastio.
 
 ### AWS Backup restore testing validation
 
 Elastio can scan the resource created as part of [AWS Backup restore testing](https://docs.aws.amazon.com/aws-backup/latest/devguide/restore-testing.html). The temporarily restored resource may be modified by Elastio directly for better performance and optimized cost. For example, Elastio stops the restored EC2 instance, detaches its volumes and attaches them to the worker EC2 instance that performs the scan.
 
-> ❗Elastio never modifies customer's production data. IAM permissions restrict Elastio to mutating only resources managed by Elastio itself. All such resources have `elastio:resource=true` tag. During regular operation of Elastio all data is treated as sensitive and Elastio can only read and create snapshots of resources. AWS Backup restore testing is an exception where a temporarily restored resource is created and handed to the scanning software to battle-test it.
+> ❗Elastio never modifies customer's data. IAM permissions restrict Elastio to modify **only** resources created and managed by Elastio itself. All such resources have `elastio:resource=true` tag. During regular operation of Elastio all data is treated as sensitive and Elastio can only read and create snapshots of customer resources. AWS Backup restore testing is an exception where a temporarily restored resource is created and handed to the scanning software to restore-test it.
 
 For Elastio to be able to modify the temporarily restored resource, you must grant explicit permission by adding a tag `elastio:resource=true` to the restored resource.
 
 
 ## Lambda API
 
-Elastio connector stack deploys an AWS Lambda function named `elastio-bg-jobs-service-aws-backup-integration`. You can use the synchronous lambda `Invoke` API to send it a request payload in JSON format. The schema of the JSON request is described below.
+Elastio Connector stack deploys an AWS Lambda function named `elastio-bg-jobs-service-aws-backup-integration`. You can use the synchronous lambda `Invoke` API to send it a request payload in JSON format. The schema of the JSON request is described below.
 
 ### Request
 
@@ -70,7 +70,7 @@ Elastio connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
     // Optional. If omitted then malware scan is disabled.
     "malware": true,
 
-    // Name of the event bus scan reports will be written to.
+    // Name of the AWS EventBridge event bus scan reports will be written to.
     //
     // Optional. If omitted, the value will be read from an SSM parameter named
     // `/elastio/iscan-results-eventbridge-bus`. If that parameter is absent then
@@ -106,8 +106,8 @@ Elastio connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
   //
   // To assist in efficient scanning of the bucket you can deploy an S3 changelog
   // SQS event queue, that Elastio will use to do scanning of the bucket in parallel
-  // with its restore process for maximum performance. See details in the paragraph
-  // 'Scanning S3 in parallel with restoring'.
+  // with its restore process for maximum performance. See details in the
+  // 'Scanning S3 in parallel with restoring' section.
   //
   // # EFS
   // The restored resource is required to be specified. Elastio only reads data
@@ -148,7 +148,7 @@ The `job_state` is a sum type of two shapes. Either one of them can be returned:
 
 ```jsonc
 {
-  // Serves as a discriminator of this shape.
+  // Serves as identifier of this shape.
   // Indicates that a new background job was started to import the requested AWS Backup RP.
   //
   // Required.
@@ -167,7 +167,7 @@ The `job_state` is a sum type of two shapes. Either one of them can be returned:
 ```
 ```jsonc
 {
-  // Serves as a discriminator of this shape.
+  // Serves as identifier of this shape.
   // Indicates that no new background job was started as a result of this request,
   // because there is an already running job that does what you need.
   //
@@ -191,7 +191,7 @@ data from S3 while AWS Backup is restoring the bucket.
 
 ### Elastio S3 changelog
 
-Elastio S3 changelog Cloudformation stack implements this component. It deploys an SQS queue
+Elastio S3 changelog Cloudformation stack introduces this component. It deploys an SQS queue
 and an EventBridge subscription for it that forwards events from the target S3 bucket.
 Documentation for Elastio S3 changelog is available [here](https://github.com/elastio/contrib/tree/master/elastio-s3-changelog).
 
@@ -199,11 +199,11 @@ The documentation at the provided link describes the use case of incremental sca
 stack that serves just for a single S3 bucket.
 
 
-The template `cloudformation-single-bucket.yaml` implements a special case of a stack for a single bucket. Use this [quick-create link](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-single-bucket.yaml&stackName=elastio-s3-changelog) to experiment with this stack. Its final template artifact developed by Elastio is always available under the following S3 link: <https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-single-bucket.yaml>. You can use this template URL when deploying the stack in production.
+The template `cloudformation-single-bucket.yaml` deploys a special case of a stack for a single bucket. Use this [quick-create link](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-single-bucket.yaml&stackName=elastio-s3-changelog) to experiment with this stack. Its final template artifact developed by Elastio is always available under the following S3 link: <https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-single-bucket.yaml>. You can use this template URL when deploying the stack into production.
 
-Elastio's AWS Backup integration lambda can automatically discover the S3 changelog from the deployed stack, and use it if it is present. You don't need to pass any additional parameters in the JSON request to the lambda. Just make sure the stack is created at the beginning of the restore testing validation process and exists while it is running.
+Elastio AWS Backup integration lambda can automatically discover the S3 changelog from the deployed stack, and use it if it is present. You don't need to pass any additional parameters in the JSON request to the lambda. Just make sure the stack is created at the beginning of the restore testing validation process and exists while it is running.
 
-Elastio doesn't delete the S3 changelog Cloudformation stack automatically, so make sure you delete it once the restore testing validation is done.
+Elastio doesn't delete the S3 changelog Cloudformation stack automatically, so make sure you delete it once the restore testing validation is done and it is not needed anymore.
 
 
 ### Stack parameters

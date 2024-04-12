@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'This stack deploys the components required to integrate AWS snapshots with Elastio'
+Parameters:
+  TagKeyToMonitor:
+    Description: The tag keys to monitor for in newly created EBS snapshots (comma-separated)
+    Type: String
+    Default: "cp:data, cp:host-snapshot-name"
+  ElastioActionTagValue:
+    Description: The value for the "elastio:action" tag to be added to snapshot. Possible values are scan, ingest, ingest-and-scan.
+    Type: String
+    Default: "scan"
+Resources:
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: "ElastioSnapshotTaggingPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "ec2:CreateTags"
+                  - "ec2:DescribeTags"
+                Resource: "*"
+
+  LambdaFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Timeout: 120
+      Handler: "index.lambda_handler"
+      Runtime: python3.8
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          TagKeyToMonitor: !Ref TagKeyToMonitor
+          ElastioActionTagValue: !Ref ElastioActionTagValue
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          
+          def lambda_handler(event, context):
+              print("event:",event)
+          
+              elastio_action_tag_value = os.environ.get('ElastioActionTagValue')
+              tag_keys_to_monitor = [tag.strip() for tag in os.environ.get('TagKeyToMonitor').split(',')]
+                      
+              resources = event['resources']
+              snapshot_ids = [arn.split('/')[-1] for arn in resources]
+              
+              print("snapshot_ids:",snapshot_ids)
+              
+              ec2_client = boto3.client('ec2')
+              
+              for snapshot_id in snapshot_ids:
+                  snapshot_tags = ec2_client.describe_tags(Filters=[{'Name': 'resource-id', 'Values': [snapshot_id]}])['Tags']
+                          
+                  print(snapshot_tags)
+                          
+                  if any(tag['Key'] in tag_keys_to_monitor for tag in snapshot_tags):
+                      ec2_client.create_tags(Resources=[snapshot_id], Tags=[{'Key': 'elastio:action', 'Value': elastio_action_tag_value}])
+                      
+  CloudWatchEventRuleSingleSnapshot:
+    Type: "AWS::Events::Rule"
+    Properties:
+      EventPattern:
+        source:
+          - "aws.ec2"
+        detail-type:
+          - "EBS Snapshot Notification"
+        detail:
+          event:
+            - "createSnapshot"
+      State: "ENABLED"
+      Targets:
+        - Arn: !GetAtt LambdaFunction.Arn
+          Id: "TargetFunctionSingle"
+
+  CloudWatchEventRuleMultiSnapshot:
+    Type: "AWS::Events::Rule"
+    Properties:
+      EventPattern:
+        source:
+          - "aws.ec2"
+        detail-type:
+          - "EBS Multi-Volume Snapshots Completion Status"
+        detail:
+          event:
+            - "createSnapshots"
+      State: "ENABLED"
+      Targets:
+        - Arn: !GetAtt LambdaFunction.Arn
+          Id: "TargetFunctionMulti"
+
+  PermissionForEventsToInvokeLambdaSingle:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt CloudWatchEventRuleSingleSnapshot.Arn
+
+  PermissionForEventsToInvokeLambdaMulti:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt CloudWatchEventRuleMultiSnapshot.Arn

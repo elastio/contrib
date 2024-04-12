@@ -14,7 +14,7 @@ Elastio can scan the resource created as part of [AWS Backup restore testing](ht
 
 > ❗Elastio never modifies customer's production data. IAM permissions restrict Elastio to mutating only resources managed by Elastio itself. All such resources have `elastio:resource=true` tag. During regular operation of Elastio all data is treated as sensitive and Elastio can only read and create snapshots of resources. AWS Backup restore testing is an exception where a temporarily restored resource is created and handed to the scanning software to battle-test it.
 
-For Elastio to be able to modify the temporarily restored resource, you must grant explicit permission. This must done by adding a tag `elastio:resource=true` to the restored resource.
+For Elastio to be able to modify the temporarily restored resource, you must grant explicit permission by adding a tag `elastio:resource=true` to the restored resource.
 
 
 ## Lambda API

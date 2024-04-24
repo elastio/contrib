@@ -21,7 +21,7 @@ Parameters:
     Default: 'false'
   QrtsBatchSize:
     Type: Number
-    Default: 0
+    MinValue: 0
   QrtsMaxDelay:
     Type: Number
     MinValue: 60

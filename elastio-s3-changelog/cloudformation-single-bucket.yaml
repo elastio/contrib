@@ -202,6 +202,26 @@ Resources:
       Tags:
         'elastio:resource': 'true'
 
+  queueRefreshSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: A schedule to invoke the periodic changelog queue refresh lambda
+      ScheduleExpression: cron(0/15 * * * ? *)
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      State: ENABLED
+      Target:
+        Arn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-s3-changelog-handler-refresh'
+        RoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/ElastioS3ChangelogSchedulerExecution'
+        Input: !Sub >
+          {
+            "queue_url": "${queue}",
+            "queue_name": "${queue.QueueName}"
+          }
+        RetryPolicy:
+          MaximumEventAgeInSeconds: 60
+          MaximumRetryAttempts: 3
+
   queueDepthAlarm:
     Type: AWS::CloudWatch::Alarm
     Condition: EnableQrts

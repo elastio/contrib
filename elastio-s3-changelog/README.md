@@ -11,11 +11,18 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 
 1. First, you need to enable Amazon EventBridge for your S3 buckets by following these instructions:
     [Enabling Amazon EventBridge](https://docs.aws.amazon.com/AmazonS3/latest/userguide/enable-event-notifications-eventbridge.html).
-2. You can use
-    [this quick-create link](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
-    to create the stack.
-
-    > You might need to switch to the region where your Elastio CloudFormation stack is deployed.
+2. Use one of the following quick-create links. Choose the region where your Elastio CloudFormation stack is deployed:
+    * [ap-south-1](https://ap-south-1.console.aws.amazon.com/cloudformation/home?region=ap-south-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [ap-southeast-2](https://ap-southeast-2.console.aws.amazon.com/cloudformation/home?region=ap-southeast-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [ca-central-1](https://ca-central-1.console.aws.amazon.com/cloudformation/home?region=ca-central-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [eu-central-1](https://eu-central-1.console.aws.amazon.com/cloudformation/home?region=eu-central-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [eu-west-1](https://eu-west-1.console.aws.amazon.com/cloudformation/home?region=eu-west-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [eu-west-2](https://eu-west-2.console.aws.amazon.com/cloudformation/home?region=eu-west-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [eu-west-3](https://eu-west-3.console.aws.amazon.com/cloudformation/home?region=eu-west-3#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [us-east-1](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [us-east-2](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [us-west-1](https://us-west-1.console.aws.amazon.com/cloudformation/home?region=us-west-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [us-west-2](https://us-west-2.console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
 
     > **Important!** You can change the stack name, but it **MUST** start with `elastio-`. Otherwise, Elastio won't be able to access the created resources.
 

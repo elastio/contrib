@@ -35,6 +35,6 @@ export ATLASSIAN_TOKEN = "your_site_token"
 
 ### Download of large files times out.
 
-When including attachments, the download file size can get rather large. To seperate scope of conerns, download is kept seperate from protect to ensure protect only starts on successful downloads.
+When including attachments, the download file size can get rather large. To separate scope of conerns, download is kept separate from protect to ensure protect only starts on successful downloads.
 
 

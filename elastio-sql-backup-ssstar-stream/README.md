@@ -1,4 +1,4 @@
-This article describs the procedure of backup and restore Miscrosoft SQL server databse. If your database hosted in Amazon RDS see [Amazon RDS SQL Server](https://github.com/elastio/contrib/edit/MSSQL/elastio-sql-backup-ssstar-stream/README.md#amazon-rds-sql-server), if you have selfhosted database see [self hosted SQL Server](https://github.com/elastio/contrib/edit/MSSQL/elastio-sql-backup-ssstar-stream/README.md#self-hosted-sql-server).
+This article describes the procedure of backup and restore Microsoft SQL server database. If your database hosted in Amazon RDS see [Amazon RDS SQL Server](https://github.com/elastio/contrib/edit/MSSQL/elastio-sql-backup-ssstar-stream/README.md#amazon-rds-sql-server), if you have selfhosted database see [self hosted SQL Server](https://github.com/elastio/contrib/edit/MSSQL/elastio-sql-backup-ssstar-stream/README.md#self-hosted-sql-server).
 
 
 # Amazon RDS SQL Server
@@ -24,7 +24,7 @@ This article describs the procedure of backup and restore Miscrosoft SQL server 
 	exec msdb.dbo.rds_backup_database
 		@source_db_name='database_name',
 		@s3_arn_to_backup_to='arn:aws:s3:::bucket_name/file_name.extension',
-		[@kms_master_key_arn='arn:aws:kms:region:account-id:key/key-id'],	
+		[@kms_master_key_arn='arn:aws:kms:region:account-id:key/key-id'],
 		[@overwrite_s3_backup_file=0|1],
 		[@type='DIFFERENTIAL|FULL'],
 		[@number_of_files=n];

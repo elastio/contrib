@@ -8,7 +8,7 @@
 
 3. Download code from contrib repository and open directory elastio-lambda-stream-backup.
 
-> if you want to use arm64/amd64 architecture, you should use the coresponding architecture for the instance
+> if you want to use arm64/amd64 architecture, you should use the corresponding architecture for the instance
 
 4. Build and push docker image:
 	1. Review the dockerfile and read the following comments for arguments such as ARCH(architecture), VERSION_TAG(elastio cli version)

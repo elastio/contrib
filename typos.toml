@@ -1,0 +1,8 @@
+# See documentation for this config file at https://github.com/crate-ci/typos/blob/master/docs/reference.md
+
+[default.extend-identifiers]
+# Abbreviation: Security information and event management
+SIEMs = "SIEMs"
+
+# Abbreviation: Recovery Time Objectives
+RTO = "RTO"

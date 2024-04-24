@@ -13,7 +13,7 @@ def id_generator(size=6, chars=string.ascii_lowercase + string.digits) -> str:
 
 def new_message_exists(topic: str, bootstrap_servers: list, partition: int, offset: int) -> dict:
     """
-    Check Kafka topic partiton for new message.
+    Check Kafka topic partition for new message.
     Function connect to Kafka, read message for the specified partition.
     Check message offset compares with the specified offset
     Returns True if the message offset is 2 greater than the specified offset.

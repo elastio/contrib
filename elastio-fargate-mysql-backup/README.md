@@ -29,7 +29,7 @@
 4. Select `ElastioMySQLBackupRole` as Task role
 5. Type Elastio-CLI as container name
 6. Paste `public.ecr.aws/elastio-dev/elastio-cli:latest` in container image URI
-7. Expand Docker configuration and paste `sh,-c` in Entry point and following comman in Command:
+7. Expand Docker configuration and paste `sh,-c` in Entry point and following command in Command:
 ```
 apt-get install awscli jq default-mysql-client -y && creds=$(aws secretsmanager get-secret-value --secret-id MySQLBackupCreds | jq ".SecretString | fromjson") && mysqldump -h $(echo $creds | jq -r ".host") -u $(echo $creds | jq -r ".username") -P $(echo $creds | jq -r ".port") -p"$(echo $creds | jq -r '.password')" DATABASE | elastio stream backup --stream-name MySQL-Daily-backup --hostname-override MySQL-hostname
 ```

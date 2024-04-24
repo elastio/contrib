@@ -61,7 +61,7 @@ def handle_aws_backup_event(event):
             tag_list = response.get('Tags')
             enable_elastio_scan = any(item in tag_list for item in ENABLE_ELASTIO_SCAN_TAG_LIST)
 
-            #Existance of Scan enable or the Lambda trigger tag
+            #Existence of Scan enable or the Lambda trigger tag
             if (enable_elastio_scan):
                 elastio_status_eb = os.environ.get('ElastioStatusEB') 
                 if not elastio_status_eb:
@@ -140,7 +140,7 @@ def save_event_data_to_s3(s3_log_bucket,json_content):
       
 def process_ransomware_details(account_id,product_arn,generator_id,scan_timestamp,aws_asset_id,aws_backup_rp_arn,elastio_rp_id,ransomware_details):
     """
-    This is the function responsbile to create ransomware findings based on ransomware_details
+    This is the function responsible to create ransomware findings based on ransomware_details
     """      
     try:
         logger.info(f'Starting process_ransomware_details')
@@ -175,7 +175,7 @@ def process_ransomware_details(account_id,product_arn,generator_id,scan_timestam
           
 def process_malware_details(account_id,product_arn,generator_id,scan_timestamp,aws_asset_id,aws_backup_rp_arn,elastio_rp_id,malware_details):
     """
-    This is the function responsbile to create malware findings based on malware_details
+    This is the function responsible to create malware findings based on malware_details
     """        
     try:
         logger.info(f'Starting process_malware_details')
@@ -386,7 +386,7 @@ def handler(event, context):
             if s3_log_bucket:
                 save_event_data_to_s3(s3_log_bucket,event)
             else:
-                logger.info('S3 Log Bucket Name Env Paramter LogsBucketName is missing. Skipping logging to S3 Bucket')
+                logger.info('S3 Log Bucket Name Env Parameter LogsBucketName is missing. Skipping logging to S3 Bucket')
                 
             generate_security_hub_findings(event)
             

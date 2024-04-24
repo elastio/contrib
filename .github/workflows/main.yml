@@ -3,6 +3,9 @@ on:
   push:
     branches:
       - master
+  pull_request:
+
+
 permissions:
   contents: read
   id-token: write
@@ -13,6 +16,7 @@ env:
   AWS_REGION: us-east-2
 jobs:
   changes:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       ci: "${{ steps.filter.outputs.ci }}"
@@ -40,6 +44,7 @@ jobs:
       - uses: crate-ci/typos@v1.20.10
 
   upload-aws-backup-elastio-integration:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     needs: changes
     if: >-
@@ -67,6 +72,7 @@ jobs:
           zip ${NAME}.zip lambda_handler.py
           aws s3 cp ${NAME}.zip s3://${S3_BUCKET}/${S3_KEY}/${NAME}.zip
   upload-elastio-s3-changelog:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     needs: changes
     if: >-

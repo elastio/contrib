@@ -1,0 +1,5 @@
+
+# We don't lock the dependencies and use the version of AWS SDK installed in the
+# managed AWS Lambda NodeJS runtime. However, we use a `package.json` to install
+# some TypeScript types to assist with development.
+package-lock.json

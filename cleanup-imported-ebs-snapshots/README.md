@@ -29,15 +29,7 @@ Because the source code for the lambda function is written in a separate TypeScr
 npm install
 ```
 
-Then run the build after you modify the code of the lambda function inside of `src/index.ts`.
-
-```bash
-npm run build
-```
-
-Then copy the output of thee JS file from the `dist/index.js` into the `cloudformation.json` file as the `InlineCode` property of the lambda function resource at the end of the template. Make sure to indent the code according to YAML syntax (the code must be two spaces deeper than the `InlineCode:` key).
-
-Now you can deploy the resulting stack with the following bash script.
+Then run the following script to build the TypeScript code, modify the lambda function inside of `src/index.ts` and deploy a test CFN stack out of it. Make sure you have `yq` installed.
 
 ```
 ./deploy.sh

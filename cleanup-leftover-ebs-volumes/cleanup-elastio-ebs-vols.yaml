@@ -6,59 +6,69 @@ Resources:
     Properties:
       FunctionName: EBSVolumeCleanupFunction
       Description: 'A Lambda function to delete un-attached EBS volumes older than 24 hours with the elastio:resource tag'
-      Runtime: nodejs16.x
+      Runtime: nodejs20.x
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
-      InlineCode: |
-        const AWS = require('aws-sdk');
-        const ec2 = new AWS.EC2();
+      InlineCode: |-
+        // @ts-check
+
+        const { EC2, paginateDescribeVolumes } = require('@aws-sdk/client-ec2');
+        const ec2 = new EC2();
 
         const isVolumeOlderThan24Hours = (createTime) => {
-          const currentTime = new Date();
-          const volumeCreateTime = new Date(createTime);
-          const timeDifference = currentTime - volumeCreateTime;
-          const hoursDifference = timeDifference / (1000 * 60 * 60);
-          return hoursDifference > 24;
+            const currentTime = new Date();
+            const volumeCreateTime = new Date(createTime);
+            const timeDifference = currentTime - volumeCreateTime;
+            const hoursDifference = timeDifference / (1000 * 60 * 60);
+            return hoursDifference > 24;
         };
 
-        exports.handler = async (event) => {
-          try {
-            console.log("Getting list of unattached EBS volumes with elastio:resource tag");
-            const { Volumes } = await ec2.describeVolumes({
-              Filters: [
-                {
-                  Name: 'status',
-                  Values: ['available']
-                },
-                {
-                  Name: 'tag:elastio:resource',
-                  Values: ['*']
+        exports.handler = async (_event) => {
+            try {
+                console.log("Getting list of unattached EBS volumes with elastio:resource tag");
+
+                const volumesPaginator = paginateDescribeVolumes(
+                    {
+                        client: ec2,
+                        pageSize: 500.
+                    },
+                    {
+                        Filters: [
+                            {
+                                Name: 'status',
+                                Values: ['available']
+                            },
+                            {
+                                Name: 'tag:elastio:resource',
+                                Values: ['*']
+                            }
+                        ]
+                    }
+                );
+
+                for await (const page of volumesPaginator) {
+                    for (const volume of page.Volumes ?? []) {
+                        if (isVolumeOlderThan24Hours(volume.CreateTime)) {
+                            console.log(`Deleting unattached Elastio EBS volume ${volume.VolumeId} older than 24 hours`);
+                            await ec2.deleteVolume({ VolumeId: volume.VolumeId });
+                            console.log(`EBS volume ${volume.VolumeId} deleted`);
+                        } else {
+                            console.log(`EBS volume ${volume.VolumeId} is not old enough; skipping it`);
+                        }
+                    }
                 }
-              ]
-            }).promise();
 
-            for (const volume of Volumes) {
-              if (isVolumeOlderThan24Hours(volume.CreateTime)) {
-                console.log("Deleting unattached Elastio EBS volume ${volume.VolumeId}  older than 24 hours");
-                await ec2.deleteVolume({ VolumeId: volume.VolumeId }).promise();
-                console.log("EBS volume ${volume.VolumeId} deleted");
-              } else {
-                console.log("EBS volume ${volume.VolumeId} is not old enough; skipping it");
-              }
+                return { statusCode: 200, body: JSON.stringify({ message: 'EBS volumes cleanup successful' }) };
+            } catch (error) {
+                console.error(error);
+                throw error;
             }
-
-            return { statusCode: 200, body: JSON.stringify({ message: 'EBS volumes cleanup successful' }) };
-          } catch (error) {
-            console.error(error);
-            throw error;
-          }
         };
       Events:
         Schedule1:
           Type: Schedule
           Properties:
             Schedule: 'rate(1 hour)'
-
   LambdaExecutionRole:
     Type: 'AWS::IAM::Role'
     Properties:
@@ -94,7 +104,6 @@ Resources:
                   - 'logs:CreateLogStream'
                   - 'logs:PutLogEvents'
                 Resource: 'arn:aws:logs:*:*:*'
-
   EBSVolumeCleanupLogGroup:
     Type: 'AWS::Logs::LogGroup'
     Properties:

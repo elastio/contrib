@@ -17,7 +17,7 @@ parser = argparse.ArgumentParser(
     prog="Elastio stream kafka",
 )
 subparser = parser.add_subparsers(dest="mod")
-# subparser accept two posible modes of work this script backup and restore
+# subparser accept two possible modes of work this script backup and restore
 
 backup_parser = subparser.add_parser("backup")
 # backup mode arguments
@@ -41,13 +41,13 @@ if args.mod == "backup":
     topic_info_data = {}
     topic_info_data['topic_name'] = args.topic_name
 
-    # Creating Kafka consummer with random group.
+    # Creating Kafka consumer with random group.
     consumer = KafkaConsumer(
         group_id=f'{_id}-group',
         bootstrap_servers=bootstrap_servers,
         auto_offset_reset='earliest', # latest/earliest
         enable_auto_commit=True,
-        auto_commit_interval_ms=1000, # 1s 
+        auto_commit_interval_ms=1000, # 1s
         consumer_timeout_ms=10000, # 10s
         api_version=(0, 10, 1)
     )
@@ -56,7 +56,7 @@ if args.mod == "backup":
     Call Elastio CLI to get stream recovery points list.
     Checking if the topic was already backup.
     If the topic previously backed up set variable topic_previously_backed_up = True
-    and geting offset last message what be stored in last time.
+    and getting offset last message what be stored in last time.
     Last message offset stored in recovery point tags with name "partition_<PARTITION_NUMBER>_last_msg_offset".
     """
     topic_previously_backed_up = False
@@ -203,8 +203,8 @@ elif args.mod == "restore":
     msg_count = 0
     # Read data from elastio stream restore process.
     # Load to json format.
-    datas = (json.loads(line.decode()) for line in res.stdout.splitlines())
-    for data in datas:
+    lines = (json.loads(line.decode()) for line in res.stdout.splitlines())
+    for data in lines:
         # Write data to the Kafka topic.
         msg_stat = prod.send(
             topic=data['topic'],
@@ -215,4 +215,4 @@ elif args.mod == "restore":
         )
         msg_count+=1
     prod.close()
-    print("Restore finished successfuly!\nRestored messeges count: {msg_count}".format(msg_count=msg_count))
+    print("Restore finished successfully!\nRestored messages count: {msg_count}".format(msg_count=msg_count))

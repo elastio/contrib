@@ -121,7 +121,7 @@ data "aws_iam_policy_document" "codepipeline" {
   }
 
   statement {
-    sid       = "ComputeDatabaseQueueNotifcationManagementPolicy"
+    sid       = "ComputeDatabaseQueueNotificationManagementPolicy"
     effect    = "Allow"
     resources = ["*"]
     actions = [

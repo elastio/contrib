@@ -32,9 +32,15 @@ jobs:
               - 'aws-backup-elastio-integration/**'
             elastio-s3-changelog:
               - 'elastio-s3-changelog/**'
+
+  typos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crate-ci/typos@v1.20.10
+
   upload-aws-backup-elastio-integration:
-    runs-on:
-      - ubuntu-latest
+    runs-on: ubuntu-latest
     needs: changes
     if: >-
       needs.changes.outputs.aws-backup-elastio-integration == 'true' ||

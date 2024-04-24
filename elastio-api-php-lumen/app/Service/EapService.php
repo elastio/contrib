@@ -209,8 +209,8 @@ class EapService
 
     public static function iScanFile($request)
     {
-        $direcotry = "iscan_" . date("U") . "_" . rand(100,1000);
-        $path = "/var/www/iscan_temp/" . $direcotry;
+        $directory = "iscan_" . date("U") . "_" . rand(100,1000);
+        $path = "/var/www/iscan_temp/" . $directory;
         @mkdir($path, $mode = 0777, false);
 
         $file = $request->file('iscan_file');

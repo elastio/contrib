@@ -73,7 +73,7 @@ export veleroBackupName=BackupName
 export veleroS3Bucket=BucketName
 export AWS_DEFAULT_REGION=AWSRegion
 ```
-Replace `BackupName` and `BucketName` with coresponding names.
+Replace `BackupName` and `BucketName` with corresponding names.
 
 Retrieve the restored EBS volume ID and its tags using the following commands.
 

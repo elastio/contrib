@@ -2,8 +2,16 @@
 
 set -euo pipefail
 
-project_dir=$(readlink -f $(dirname $0))
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
-aws cloudformation deploy --template-file $project_dir/cloudformation.yaml \
+npm run build
+
+code=$(cat dist/index.js) \
+yq --inplace '.Resources.Lambda.Properties.InlineCode = strenv(code)' \
+    cloudformation.yaml
+
+set -x
+
+aws cloudformation deploy --template-file cloudformation.yaml \
     --capabilities CAPABILITY_IAM \
     --stack-name elastio-imported-ebs-snapshots-cleanup-stack

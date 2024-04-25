@@ -29,3 +29,6 @@ terraform.tfvars
 .terraform.lock.hcl
 
 .tmuxp.yaml
+
+# Ignore JS/TS dependencies installed with npm
+node_modules

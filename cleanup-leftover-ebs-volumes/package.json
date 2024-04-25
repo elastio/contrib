@@ -1,0 +1,7 @@
+{
+  "name": "cleanup-leftover-ebs-volumes",
+  "version": "1.0.0",
+  "dependencies": {
+    "@aws-sdk/client-ec2": "3.561"
+  }
+}

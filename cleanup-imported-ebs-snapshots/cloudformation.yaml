@@ -4,15 +4,14 @@ Parameters:
   KeepMaxAgeInDays:
     Type: Number
     Default: '7'
-    Description: >
+    Description: |-
       The maximum age of snapshots to keep in days.
       If a snapshot is older than this value, it will be deleted unless there
       it fits into {KeepMinAmount} of latest snapshots.
-
   KeepMinAmount:
     Type: Number
     Default: '7'
-    Description: >
+    Description: |-
       The minimum amount of snapshots to keep for each volume even if they are older than {KeepMaxAgeInDays}.
       If there are less than this amount of snapshots for a volume, none of them will be deleted.
 Resources:
@@ -23,18 +22,19 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Service: [lambda.amazonaws.com] }
-            Action: [sts:AssumeRole]
+            Principal:
+              Service: [lambda.amazonaws.com]
+            Action: ['sts:AssumeRole']
       Policies:
         - PolicyName: EBSSnashotsPolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: [ec2:DescribeSnapshots]
+                Action: ['ec2:DescribeSnapshots']
                 Resource: "*"
               - Effect: Allow
-                Action: [ec2:DeleteSnapshot]
+                Action: ['ec2:DeleteSnapshot']
                 Resource: "*"
                 Condition:
                   StringLike:
@@ -42,9 +42,8 @@ Resources:
               - Effect: Allow
                 # We don't give the lambda a permission to create log groups
                 # because we pre-create the log group ourselves
-                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Action: ['logs:CreateLogStream', 'logs:PutLogEvents']
                 Resource: arn:aws:logs:*:*:*
-
   # The default log group that AWS Lambda creates has retention disabled.
   # We don't want to store logs indefinitely, so we create a custom log group with
   # retention enabled.
@@ -55,7 +54,6 @@ Resources:
       # This lambda does destructive operations, so we want to keep the logs for a long time
       # to be safe and to be able to debug any issues if they happen.
       RetentionInDays: 180
-
   Lambda:
     Type: AWS::Serverless::Function
     # We want to create a custom log group with retention enabled first,
@@ -64,7 +62,7 @@ Resources:
     Properties:
       FunctionName: elastio-cleanup-imported-ebs-snapshots
       Description: "A Lambda function to delete EBS snapshots tagged with elastio:imported-to-rp"
-      Runtime: nodejs18.x
+      Runtime: nodejs20.x
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:
@@ -72,16 +70,14 @@ Resources:
           Type: ScheduleV2
           Properties:
             ScheduleExpression: rate(1 hour)
-
       Environment:
         Variables:
           DELETE_BY_TAG_KEY: elastio:imported-to-rp
           KEEP_MAX_AGE_IN_DAYS: !Ref KeepMaxAgeInDays
           KEEP_MIN_AMOUNT: !Ref KeepMinAmount
-
       # Change the code if the lambda in the `src/index.ts` file and then run `npm run build`.
       # After that, copy the content of the `dist/index.js` file and paste it here.
-      InlineCode: |
+      InlineCode: |-
         "use strict";
         Object.defineProperty(exports, "__esModule", { value: true });
         exports.CleanupContext = exports.handler = void 0;
@@ -93,9 +89,9 @@ Resources:
         const BROKEN_VOLUME_ID = 'vol-ffffffff';
         const ec2 = new client_ec2_1.EC2Client({});
         /**
-        * A handler that is invoked periodically based on an AWS Scheduler schedule
-        * and cleans up EBS snapshots that were already imported to Elastio.
-        */
+         * A handler that is invoked periodically based on an AWS Scheduler schedule
+         * and cleans up EBS snapshots that were already imported to Elastio.
+         */
         async function handler() {
             const now = new Date();
             console.log(`Starting the cleanup relative to the current timestamp ${now.toISOString()}`);
@@ -206,8 +202,8 @@ Resources:
                 return new CleanupTotal(volumes, snapshots);
             }
             /**
-            * Retain only snapshots that need to be deleted
-            */
+             * Retain only snapshots that need to be deleted
+             */
             filterSnapshotsToDelete() {
                 const toDeleteMap = new Map();
                 for (const [volumeId, toDelete] of this.snapshots) {

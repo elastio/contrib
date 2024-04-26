@@ -12,10 +12,13 @@ An encrypted and compressed copy of your data can be efficiently imported into a
 
 Elastio can scan the resource created as part of [AWS Backup restore testing](https://docs.aws.amazon.com/aws-backup/latest/devguide/restore-testing.html). The temporarily restored resource may be modified by Elastio directly for better performance and optimized cost. For example, Elastio stops the restored EC2 instance, detaches its volumes and attaches them to the worker EC2 instance that performs the scan.
 
-> ❗Elastio never modifies customer's data. IAM permissions restrict Elastio to modify **only** the resources listed below.
-> - Resources created and managed by Elastio itself. All such resources have `elastio:resource=true` tag.
-> - Resources created by AWS Backup restore testing. All such resources have `awsbackup-restore-test` tag.
-> During regular operation of Elastio all data is treated as sensitive and Elastio can only read and create snapshots of customer resources. AWS Backup restore testing is an exception where a temporarily restored resource is created and handed to the scanning software to restore-test it.
+---
+
+❗Elastio never modifies customer's data. IAM permissions restrict Elastio to modify **only** the resources listed below.
+- Resources created and managed by Elastio itself. All such resources have `elastio:resource=true` tag.
+- Resources created by AWS Backup restore testing. All such resources have `awsbackup-restore-test` tag.
+
+During regular operation of Elastio all data is treated as sensitive and Elastio can only read and create snapshots of customer resources. AWS Backup restore testing is an exception where a temporarily restored resource is created and handed to the scanning software to restore-test it.
 
 ## Lambda API
 

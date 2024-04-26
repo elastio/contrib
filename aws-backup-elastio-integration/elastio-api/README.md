@@ -14,7 +14,7 @@ Elastio can scan the resource created as part of [AWS Backup restore testing](ht
 
 ---
 
-❗Elastio never modifies customer's data. IAM permissions restrict Elastio to modify **only** the resources listed below.
+❗Elastio never modifies customer's production data. IAM permissions restrict Elastio to modify **only** the resources listed below.
 - Resources created and managed by Elastio itself. All such resources have `elastio:resource=true` tag.
 - Resources created by AWS Backup restore testing. All such resources have `awsbackup-restore-test` tag.
 

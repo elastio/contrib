@@ -15,10 +15,11 @@ chmod +x elastio-vpc-test.sh
 ./elastio-vpc-test.sh
 ```
 
-> NOTE: if you have an SCP or other policy mechanism that requires EC2 instances be created with certain tags, 
+> [!NOTE]
+> If you have an SCP or other policy mechanism that requires EC2 instances be created with certain tags,
 > use the `--instance-tags` argument to the `elastio-vpc-test.sh` script to specify the tags.  Here's an example of how
 > you can modify the last line in the script above to set tags:
-> 
+>
 > ```
 > ./elastio-vpc-test.sh --instance-tags Key=my-custom-tag,Value=foo,Key=my-other-custom-tag,Value=bar
 > ```
@@ -30,18 +31,16 @@ This script automates the process of evaluating the subnets within a VPC to test
 
 To use it, choose the VPC you want to evaluate from the list, and the script will test each subnet in that VPC, one by one, by performing a Network Reachability Analyzer analysis.
 
-NOTE: This script will launch one very short-lived t2.micro instance in each subnet of the VPC, and it will perform Network Reachability Analyzer analysis, both of which incurr AWS charges. These
-charges are very small, but they will be incurred.
+NOTE: This script will launch one very short-lived t2.micro instance in each subnet of the VPC, and it will perform Network Reachability Analyzer analysis, both of which incurr AWS charges. These charges are very small, but they will be incurred.
 
-Please also note that this script only works within the AWS environment and requires appropriate permissions to create and manage EC2 instances and network paths. Ensure you have these permissions
-before running the script to avoid execution errors.
+Please also note that this script only works within the AWS environment and requires appropriate permissions to create and manage EC2 instances and network paths. Ensure you have these permissions before running the script to avoid execution errors.
 
 Discovering available VPCs in us-east-2...
 
 1: vpc-e2563889 (Name: None, IsDefault: True)
 2: vpc-01a77fdcee459e9e6 (Name: ElastioTest, IsDefault: False)
 
-Select VPC (Press Enter to select VPC 1, or Ctrl-D to abort): 
+Select VPC (Press Enter to select VPC 1, or Ctrl-D to abort):
 ```
 
 To proceed further, enter the number of the VPC to analyze.  The script will run for a few minutes, outputting updates
@@ -60,7 +59,7 @@ Subnet Analysis Results:
 If a subnet can be used with Elastio, it is listed as "Internet reachable: True".  If it's not suitable for use with
 Elastio, the value will be `False`.
 
-If a subnet reports `False` for internet reachability, review the corresponding Network Insights path created 
+If a subnet reports `False` for internet reachability, review the corresponding Network Insights path created
 by the script, to understand why exactly it produced that result.
 
 For more information on how to configure a VPC for use by Elastio, see the [Elastio docs on VPC

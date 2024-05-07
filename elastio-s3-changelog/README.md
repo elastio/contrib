@@ -13,7 +13,8 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
     [Enabling Amazon EventBridge](https://docs.aws.amazon.com/AmazonS3/latest/userguide/enable-event-notifications-eventbridge.html).
 2. Use one of the following quick-create links. Choose the region where your Elastio Cloud Connector is deployed.
 
-    **Important!** You can change the stack name, but it **MUST** start with `elastio-`. Otherwise, Elastio won't be able to access the created resources.
+    > [!IMPORTANT]
+    > You can change the stack name, but it **MUST** start with `elastio-`. Otherwise, Elastio won't be able to access the created resources.
 
     * [us-east-1](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
     * [us-east-2](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
@@ -38,6 +39,7 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
         This means that the *KeyPrefixes* parameter must be in sync with the paths selector in the Protection Policy,
         or not specified at all.
 
+    > [!NOTE]
     > There are also some advanced and experimental parameters in the template, you can ignore them.
 
 4. Check the box in front of `I acknowledge that AWS CloudFormation might create IAM resources with custom names`

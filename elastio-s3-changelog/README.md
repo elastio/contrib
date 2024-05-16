@@ -41,6 +41,10 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 
     * *DisableEventCollection* - if you decide to disable the protection policy for your S3 bucket, you can set this
         to `true` to stop accumulating S3 update events in the SQS queue.
+        **IMPORTANT**: If you set this parameter to `true`, then no more objects will be scanned on this bucket.
+        If you set it back to `false`, then any new objects after the parameter is set to `false` will be available
+        to scan, but all changes made to the bucket during the time when this parameter was set to `true` will not be
+        scanned, unless you manually initiate a full scan of the entire bucket.
 
     > There are other advanced and experimental parameters in the template, you can ignore them.
 

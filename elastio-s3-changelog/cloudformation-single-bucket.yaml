@@ -28,6 +28,12 @@ Parameters:
       is enabled, paths selector in the Protection Policy will also be used to filter objects before scanning.
       Example: xyz/,foo/bar/
 
+  DisableEventCollection:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: If set to true, disables the changelog events collection.
+
   EnableDlq:
     Type: String
     AllowedValues: ['true', 'false']
@@ -73,6 +79,7 @@ Metadata:
 
       - Label: { default: Advanced Parameters }
         Parameters:
+          - DisableEventCollection
           - EnableDlq
 
       - Label: { default: Experimental Parameters }
@@ -83,6 +90,7 @@ Metadata:
 
 Conditions:
   ScanExistingObjects: !Equals [!Ref ScanExistingObjects, 'true']
+  DisableEventCollection: !Equals [!Ref DisableEventCollection, 'true']
   EnableDlq: !Equals [!Ref EnableDlq, 'true']
   EnableQrts: !Equals [!Ref EnableQrts, 'true']
   NoKeyPrefixes: !Equals [!Ref KeyPrefixes, '']
@@ -125,6 +133,10 @@ Resources:
     Type: AWS::Events::Rule
     Properties:
       Description: !Sub Track S3 object change events in ${BucketName}
+      State: !If
+        - DisableEventCollection
+        - DISABLED
+        - ENABLED
       EventPattern: !If
         - NoKeyPrefixes
         - !Sub >
@@ -209,7 +221,10 @@ Resources:
       ScheduleExpression: cron(0/15 * * * ? *)
       FlexibleTimeWindow:
         Mode: 'OFF'
-      State: ENABLED
+      State: !If
+        - DisableEventCollection
+        - DISABLED
+        - ENABLED
       Target:
         Arn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-s3-changelog-handler-refresh'
         RoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/ElastioS3ChangelogSchedulerExecution'

@@ -13,6 +13,11 @@ Parameters:
   ScanExistingObjects:
     Type: String
     Default: 'false'
+  KeyPrefixes:
+    Type: String
+  DisableEventCollection:
+    Type: String
+    Default: 'false'
   EnableDlq:
     Type: String
     Default: 'true'
@@ -25,8 +30,6 @@ Parameters:
   QrtsMaxDelay:
     Type: Number
     MinValue: 60
-  KeyPrefixes:
-    Type: String
 Resources:
   'Fn::ForEach::Stacks':
     - BucketName
@@ -37,11 +40,12 @@ Resources:
           Parameters:
             BucketName: !Ref BucketName
             ScanExistingObjects: !Ref ScanExistingObjects
+            KeyPrefixes: !Ref KeyPrefixes
+            DisableEventCollection: !Ref DisableEventCollection
             EnableDlq: !Ref EnableDlq
             EnableQrts: !Ref EnableQrts
             QrtsBatchSize: !Ref QrtsBatchSize
             QrtsMaxDelay: !Ref QrtsMaxDelay
-            KeyPrefixes: !Ref KeyPrefixes
           TemplateURL: https://{{S3_BUCKET}}.s3.{{AWS_REGION}}.amazonaws.com/{{S3_PREFIX}}/{{VERSION}}/cloudformation-single-bucket.yaml
 Outputs:
   templateVersion:

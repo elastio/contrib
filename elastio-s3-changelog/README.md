@@ -11,6 +11,7 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 
 1. First, you need to enable Amazon EventBridge for your S3 buckets by following these instructions:
     [Enabling Amazon EventBridge](https://docs.aws.amazon.com/AmazonS3/latest/userguide/enable-event-notifications-eventbridge.html).
+
 2. Use one of the following quick-create links. Choose the region where your Elastio Cloud Connector is deployed.
 
     **Important!** You can change the stack name, but it **MUST** start with `elastio-`. Otherwise, Elastio won't be able to access the created resources.
@@ -32,13 +33,16 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 
     * *ScanExistingObjects* - set to `true` if you want to perform the initial scan of all objects in the bucket(s);
 
-    * *KeyPrefixes* - comma-separated list of prefixes of objects to scan. This will be applied to all buckets.
+    * *KeyPrefixes* - (optional) comma-separated list of prefixes of objects to scan. This will be applied to all buckets.
         If you want to use different prefixes for different buckets, you need to deploy multiple S3 Changelog stacks.
         Also, note that the paths selector in the Protection Policy will also be used to filter objects before scanning.
         This means that the *KeyPrefixes* parameter must be in sync with the paths selector in the Protection Policy,
-        or not specified at all.
+        or not specified at all;
 
-    > There are also some advanced and experimental parameters in the template, you can ignore them.
+    * *DisableEventCollection* - if you decide to disable the protection policy for your S3 bucket, you can set this
+        to `true` to stop accumulating S3 update events in the SQS queue.
+
+    > There are other advanced and experimental parameters in the template, you can ignore them.
 
 4. Check the box in front of `I acknowledge that AWS CloudFormation might create IAM resources with custom names`
     and `I acknowledge that AWS CloudFormation might require the following capability: CAPABILITY_AUTO_EXPAND`

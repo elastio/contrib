@@ -29,6 +29,12 @@ Parameters:
       is enabled, paths selector in the Protection Policy will also be used to filter objects before scanning.
       Example: xyz/, foo/bar/
 
+  DisableEventCollection:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: If set to true, disables the changelog events collection.
+
   EnableDlq:
     Type: String
     AllowedValues: ['true', 'false']
@@ -74,6 +80,7 @@ Metadata:
 
       - Label: { default: Advanced Parameters }
         Parameters:
+          - DisableEventCollection
           - EnableDlq
 
       - Label: { default: Experimental Parameters }
@@ -89,11 +96,12 @@ Resources:
       Parameters:
         BucketNames: !Join [',', !Ref BucketNames]
         ScanExistingObjects: !Ref ScanExistingObjects
+        KeyPrefixes: !Join [',', !Ref KeyPrefixes]
+        DisableEventCollection: !Ref DisableEventCollection
         EnableDlq: !Ref EnableDlq
         EnableQrts: !Ref EnableQrts
         QrtsBatchSize: !Ref QrtsBatchSize
         QrtsMaxDelay: !Ref QrtsMaxDelay
-        KeyPrefixes: !Join [',', !Ref KeyPrefixes]
       TemplateURL: https://{{S3_BUCKET}}.s3.{{AWS_REGION}}.amazonaws.com/{{S3_PREFIX}}/{{VERSION}}/cloudformation-multiple-buckets-with-macros.yaml
 
 Outputs:

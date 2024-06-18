@@ -136,6 +136,12 @@ Elastio Connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
   //
   // If this parameter is specified Elastio attaches the restored volume to
   // its worker instance that performs the scan.
+  //
+  // # VirtualMachine
+  // It is required to specify the ID of the temporary EC2 instance which is
+  // created during the restore testing of a VirtualMachine recovery point.
+  // Elastio stops the restored EC2 instance, detaches its volumes and attaches
+  // them to its own worker instance that performs the scan.
   "restored_resource_id": "fs-0f7c4cb255b35a06d",
 }
 ```

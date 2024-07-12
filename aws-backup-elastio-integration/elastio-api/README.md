@@ -62,6 +62,10 @@ Elastio Connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
   // the default specified above will be used.
   "action": "ingest-and-scan",
 
+  // Optional. Enables filesystem corruption checks scan.
+  // If omitted then fs check is disabled.
+  "fs_check": false,
+
   // Options related to scanning.
   //
   // Optional. If omitted then scanning is disabled. Required only when `action`

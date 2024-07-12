@@ -1,8 +1,10 @@
-import boto3
-import botocore
+from datetime import datetime
 import json
 import os
 import time
+
+import boto3
+import botocore
 
 cfn = boto3.client('cloudformation')
 ec2 = boto3.client('ec2')
@@ -19,15 +21,16 @@ def lambda_handler(event, _context):
     print("event:", event)
 
     if bool(event.get('elastio_scheduled_cleanup')):
-        cleanup_nat(None)
+        cleanup_nat(None, None)
     else:
         instance_id = event['detail']['instance-id']
         instance_state = event['detail']['state']
+        event_time = datetime.fromisoformat(event['time'])
 
         if instance_state == 'pending':
             ensure_nat(instance_id)
         elif instance_state in ('stopped', 'terminated'):
-            cleanup_nat(instance_id)
+            cleanup_nat(instance_id, event_time)
 
 
 def request(client, operation, query, **kwargs):
@@ -55,7 +58,10 @@ def ensure_nat(instance_id):
     instance_subnet_id = instance['SubnetId']
     instance_tags = instance['Tags']
 
-    if not any(tag['Key'] == 'elastio:resource' and tag['Value'] == 'true' for tag in instance_tags):
+    if not any(
+            tag['Key'] == 'elastio:resource' and tag['Value'] == 'true'
+            for tag in instance_tags
+    ):
         print(f"No matching elastio:resource tag found on instance {instance_id}; no action taken.")
         return
 
@@ -119,7 +125,8 @@ def ensure_nat(instance_id):
     stack_name = f"{NAT_CFN_PREFIX}{instance_vpc_id}"
 
     if not is_stack_deployed(stack_name):
-        print(f"No existing stack found for {instance_vpc_id}, deploying new NAT gateway stack '{stack_name}'.")
+        print(f"No existing stack found for {instance_vpc_id},"
+              f" deploying new NAT gateway stack '{stack_name}'.")
         deploy_nat_stack(stack_name, nat_subnet_id, instance_route_table_id)
     else:
         print(f"Stack {stack_name} already exists or is in progress; nothing more to do.")
@@ -215,7 +222,7 @@ def get_all_traffic_route(route_table):
     return None
 
 
-def cleanup_nat(current_instance_id):
+def cleanup_nat(current_instance_id, event_time):
     elastio_instances = {instance['InstanceId']: instance for instance in request(
         ec2,
         'describe_instances',
@@ -236,7 +243,11 @@ def cleanup_nat(current_instance_id):
     print("No elastio instances found.")
 
     try:
-        pending_cleanups = pending_cleanups_vpc_ids(elastio_instances, current_instance_id)
+        pending_cleanups = pending_cleanups_vpc_ids(
+            elastio_instances,
+            current_instance_id,
+            event_time,
+        )
     except Exception as e:
         print("Failed to list pending cleanups; assuming there are none", e)
         pending_cleanups = set()
@@ -260,10 +271,12 @@ def cleanup_nat(current_instance_id):
             delete_nat_gateway_stack(stack_name)
 
 
-def pending_cleanups_vpc_ids(elastio_instances, current_instance_id):
+def pending_cleanups_vpc_ids(elastio_instances, current_instance_id, event_time):
     """
-    Returns VPC ids for which there are pending cleanup tasks in the state machine,
-    currently waiting for the quiescent period.
+    Returns VPC IDs for which there are more recent pending cleanup tasks in
+    the state machine, currently waiting for the quiescent period.
+    In other words, it returns IDs of the VPCs we should skip the cleanup for,
+    because it will be soon handled by a more recent event.
     """
     state_machine_arn = request(
         cfn,
@@ -288,9 +301,16 @@ def pending_cleanups_vpc_ids(elastio_instances, current_instance_id):
         )
         exec_input = json.loads(execution['input'])
         instance_id = exec_input['detail']['instance-id']
+        exec_time = datetime.fromisoformat(exec_input['time'])
 
-        # skip execution that invoked currently running lambda
+        # skip the execution that invoked the currently running lambda
         if instance_id == current_instance_id:
+            continue
+
+        # if the instance event of the execution is older than one we
+        # are currently handling, then we should do the cleanup, so
+        # we don't add the vpc id to the set
+        if event_time is not None and exec_time < event_time:
             continue
 
         if instance_id in elastio_instances:

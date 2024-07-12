@@ -1,0 +1,215 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/goformation/master/schema/cloudformation.schema.json
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Provisions a NAT Gateway when Elastio worker instances are running, and de-provisions the gateway when
+  the instances are not running.
+Parameters:
+  DeleteQuiescentPeriodSeconds:
+    Type: Number
+    Default: 300
+    MinValue: 0
+    Description: How long to wait for new EC2 instances to appear before deleting the NAT Gateway
+  CleanupScheduleCron:
+    Type: String
+    Default: '0 1 * * ? *'
+    Description: >
+      A cron expression that defines when and how often to run a cleanup routine.
+      The syntax corresponds to the AWS Scheduler's cron expression syntax:
+      https://docs.aws.amazon.com/scheduler/latest/UserGuide/schedule-types.html#cron-based
+  NatGatewayStackPrefix:
+    Type: String
+    Default: elastio-nat-gateway-
+    MinLength: 1
+    Description: Prefix of the name of the NAT Gateway CFN stack. The name will be <prefix><vpc-id>
+  LambdaMemorySize:
+    Type: Number
+    Default: 512
+    MinValue: 128
+    MaxValue: 10240
+    Description: Amount of memory allocated to the lambda function
+  LambdaTimeout:
+    Type: Number
+    Default: 600
+    MinValue: 10
+    MaxValue: 900
+    Description: Max amount of time the lambda function can run
+
+Resources:
+  lambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:
+        - PolicyName: ElastioNatProvisionPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - ec2:AllocateAddress
+                  - ec2:CreateNatGateway
+                  - ec2:CreateRoute
+                  - ec2:CreateTags
+                  - ec2:DeleteNatGateway
+                  - ec2:DeleteRoute
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeInstances
+                  - ec2:DescribeNatGateways
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:ReleaseAddress
+                  - states:DescribeExecution
+                  - states:ListExecutions
+                Resource: '*'
+
+  lambdaInvocationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+                - scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: lambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt lambdaFunction.Arn
+
+  stateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: startStateMachinePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !GetAtt natGatewayCleanupStateMachine.Arn
+
+  lambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: lambda.lambda_handler
+      Runtime: python3.12
+      MemorySize: !Ref LambdaMemorySize
+      Timeout: !Ref LambdaTimeout
+      Role: !GetAtt lambdaRole.Arn
+      Environment:
+        Variables:
+          LAMBDA_STACK_ID: !Ref AWS::StackId
+          NAT_CFN_PREFIX: !Ref NatGatewayStackPrefix
+          NAT_CFN_TEMPLATE_URL: https://{{S3_BUCKET}}.s3.{{AWS_REGION}}.amazonaws.com/{{S3_PREFIX}}/{{VERSION}}/cloudformation-nat.yaml
+      Code:
+        S3Bucket: {{S3_BUCKET}}
+        S3Key: {{S3_PREFIX}}/{{VERSION}}/lambda.zip
+
+  pendingInstancesSubscription:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Track pending EC2 instances for Elastio NAT Gateway provisioner lambda
+      EventPattern:
+        source: [ aws.ec2 ]
+        detail-type: [ EC2 Instance State-change Notification ]
+        detail:
+          state:
+            - pending
+      Targets:
+        - Arn: !GetAtt lambdaFunction.Arn
+          Id: event-handler
+
+  pendingInstancesLambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref lambdaFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt pendingInstancesSubscription.Arn
+
+  stoppedInstancesSubscription:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Track stopped and terminated EC2 instances for Elastio NAT Gateway provisioner lambda
+      EventPattern:
+        source: [ aws.ec2 ]
+        detail-type: [ EC2 Instance State-change Notification ]
+        detail:
+          state:
+            - stopped
+            - terminated
+      Targets:
+        - Arn: !GetAtt natGatewayCleanupStateMachine.Arn
+          Id: event-handler
+          RoleArn: !GetAtt stateMachineExecutionRole.Arn
+
+  natGatewayCleanupStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt lambdaInvocationRole.Arn
+      Definition:
+        StartAt: Wait
+        States:
+          Wait:
+            Type: Wait
+            Seconds: !Ref DeleteQuiescentPeriodSeconds
+            Next: InvokeLambda
+          InvokeLambda:
+            Type: Task
+            Resource: !GetAtt lambdaFunction.Arn
+            End: true
+
+  cleanupSchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: A schedule to cleanup unnecessary deployed NAT Gateways
+      ScheduleExpression: !Sub cron(${CleanupScheduleCron})
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      State: ENABLED
+      Target:
+        Arn: !GetAtt lambdaFunction.Arn
+        RoleArn: !GetAtt lambdaInvocationRole.Arn
+        Input: '{ "elastio_scheduled_cleanup": true }'
+
+Outputs:
+  templateVersion:
+    Value: {{VERSION}}
+  lambdaFunctionArn:
+    Value: !GetAtt lambdaFunction.Arn
+  pendingInstancesSubscriptionArn:
+    Value: !GetAtt pendingInstancesSubscription.Arn
+  stoppedInstancesSubscriptionArn:
+    Value: !GetAtt stoppedInstancesSubscription.Arn
+  natGatewayCleanupStateMachineArn:
+    Value: !GetAtt natGatewayCleanupStateMachine.Arn
+  cleanupScheduleArn:
+    Value: !GetAtt cleanupSchedule.Arn

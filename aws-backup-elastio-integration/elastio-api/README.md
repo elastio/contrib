@@ -64,6 +64,9 @@ Elastio Connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
 
   // Optional. Enables filesystem corruption checks scan.
   // If omitted then fs check is disabled.
+  // Currently it is only available for:
+  // - EBS volumes
+  // - EC2 instances
   "fs_check": false,
 
   // Options related to scanning.

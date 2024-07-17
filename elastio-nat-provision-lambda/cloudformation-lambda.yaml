@@ -8,7 +8,7 @@ Parameters:
     Type: Number
     Default: 300
     MinValue: 0
-    Description: How long to wait for new EC2 instances to appear before deleting the NAT Gateway
+    Description: How long to wait for no new EC2 instances to appear before deleting the NAT Gateway
   CleanupScheduleCron:
     Type: String
     Default: '0 1 * * ? *'
@@ -33,8 +33,22 @@ Parameters:
     MinValue: 10
     MaxValue: 900
     Description: Max amount of time the lambda function can run
+  LambdaLogsRetention:
+    Type: String
+    Default: '7'
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
+    Description: The number of days to retain the log events in the lambda's log group
 
 Resources:
+  # The default log group that AWS Lambda creates has retention disabled.
+  # We don't want to store logs indefinitely, so we create a custom log group with
+  # retention enabled.
+  lambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/elastio-nat-gateway-provision
+      RetentionInDays: !Ref LambdaLogsRetention
+
   lambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -45,8 +59,6 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
       Policies:
         - PolicyName: ElastioNatProvisionPolicy
           PolicyDocument:
@@ -54,14 +66,11 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - cloudformation:CreateStack
-                  - cloudformation:DeleteStack
                   - cloudformation:DescribeStacks
                   - ec2:AllocateAddress
                   - ec2:CreateNatGateway
                   - ec2:CreateRoute
                   - ec2:CreateTags
-                  - ec2:DeleteNatGateway
                   - ec2:DeleteRoute
                   - ec2:DescribeAddresses
                   - ec2:DescribeInstances
@@ -73,6 +82,22 @@ Resources:
                   - states:DescribeExecution
                   - states:ListExecutions
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:DeleteStack
+                  - ec2:DeleteNatGateway
+                Resource: '*'
+                Condition:
+                  StringLike:
+                    aws:ResourceTag/elastio:resource: '*'
+              - Effect: Allow
+                # We don't give the lambda a permission to create log groups
+                # because we pre-create the log group ourselves
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
 
   lambdaInvocationRole:
     Type: AWS::IAM::Role
@@ -119,6 +144,7 @@ Resources:
   lambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
+      FunctionName: elastio-nat-gateway-provision
       Handler: lambda.lambda_handler
       Runtime: python3.12
       MemorySize: !Ref LambdaMemorySize
@@ -126,9 +152,9 @@ Resources:
       Role: !GetAtt lambdaRole.Arn
       Environment:
         Variables:
-          LAMBDA_STACK_ID: !Ref AWS::StackId
           NAT_CFN_PREFIX: !Ref NatGatewayStackPrefix
           NAT_CFN_TEMPLATE_URL: https://{{S3_BUCKET}}.s3.{{AWS_REGION}}.amazonaws.com/{{S3_PREFIX}}/{{VERSION}}/cloudformation-nat.yaml
+          STATE_MACHINE_ARN: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:elastio-nat-gateway-provision-state-machine'
       Code:
         S3Bucket: {{S3_BUCKET}}
         S3Key: {{S3_PREFIX}}/{{VERSION}}/lambda.zip
@@ -174,6 +200,7 @@ Resources:
   natGatewayCleanupStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
+      StateMachineName: elastio-nat-gateway-provision-state-machine
       RoleArn: !GetAtt lambdaInvocationRole.Arn
       Definition:
         StartAt: Wait

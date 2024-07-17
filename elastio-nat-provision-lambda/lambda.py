@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime
 import json
 import os
@@ -10,9 +11,9 @@ cfn = boto3.client('cloudformation')
 ec2 = boto3.client('ec2')
 sfn = boto3.client('stepfunctions')
 
-LAMBDA_STACK_ID = os.environ['LAMBDA_STACK_ID']
 NAT_CFN_PREFIX = os.environ['NAT_CFN_PREFIX']
 NAT_CFN_TEMPLATE_URL = os.environ['NAT_CFN_TEMPLATE_URL']
+STATE_MACHINE_ARN = os.environ['STATE_MACHINE_ARN']
 
 
 def lambda_handler(event, _context):
@@ -71,6 +72,7 @@ def ensure_nat(instance_id):
         'Subnets',
         Filters=[{'Name': 'vpc-id', 'Values': [instance_vpc_id]}],
     )}
+    print("subnets:", subnets)
 
     route_tables = {rt['RouteTableId']: rt for rt in request(
         ec2,
@@ -78,6 +80,7 @@ def ensure_nat(instance_id):
         'RouteTables',
         Filters=[{'Name': 'vpc-id', 'Values': [instance_vpc_id]}],
     )}
+    print("route_tables:", subnets)
 
     main_route_table_id = None
     subnet_to_route_table = {}
@@ -95,6 +98,8 @@ def ensure_nat(instance_id):
             subnet_to_route_table[subnet_id] = main_route_table_id
 
     public_subnets_ids = set(get_public_subnets(subnet_to_route_table, route_tables))
+    print("public_subnets_ids:", public_subnets_ids)
+
     instance_route_table_id = subnet_to_route_table[instance_subnet_id]
     instance_route_table = route_tables[instance_route_table_id]
 
@@ -103,7 +108,12 @@ def ensure_nat(instance_id):
         return
 
     if instance_subnet_id in public_subnets_ids:
-        print("Instance is running in a public subnet; exiting")
+        if not subnets[instance_subnet_id]['MapPublicIpOnLaunch']:
+            print("WARN: Instance is launched in a public subnet, but the subnet has"
+                  " `MapPublicIpOnLaunch` set to `false`. In order for Elastio workers"
+                  " to be able to access internet, `MapPublicIpOnLaunch` must be set to `true`.")
+        else:
+            print("Instance is running in a public subnet; exiting")
         return
 
     all_traffic_route = get_all_traffic_route(instance_route_table)
@@ -112,21 +122,23 @@ def ensure_nat(instance_id):
         print(f"Route table already has a route for 0.0.0.0/0; exiting. {all_traffic_route}")
         return
 
-    print("subnets:", subnets)
-    print("public_subnets_ids:", public_subnets_ids)
-    print("instance_subnet_id:", instance_subnet_id)
-
-    nat_subnet_id = choose_subnet_for_nat(subnets, public_subnets_ids, instance_subnet_id)
+    nat_subnet_id = choose_subnet_for_nat(
+        subnets,
+        public_subnets_ids,
+        instance_subnet_id,
+        instance_vpc_id,
+    )
 
     if nat_subnet_id is None:
-        print("Unable to find a subnet in the same availability zone; exiting")
+        print("Unable to find a public subnet for NAT in the same availability zone; exiting")
         return
 
-    stack_name = f"{NAT_CFN_PREFIX}{instance_vpc_id}"
+    print(f"choosing {nat_subnet_id}")
+
+    stack_name = f"{NAT_CFN_PREFIX}{nat_subnet_id}"
 
     if not is_stack_deployed(stack_name):
-        print(f"No existing stack found for {instance_vpc_id},"
-              f" deploying new NAT gateway stack '{stack_name}'.")
+        print(f"No existing stack '{stack_name}' found, deploying new stack")
         deploy_nat_stack(stack_name, nat_subnet_id, instance_route_table_id)
     else:
         print(f"Stack {stack_name} already exists or is in progress; nothing more to do.")
@@ -169,33 +181,51 @@ def is_stack_deployed(stack_name):
 
 
 def deploy_nat_stack(stack_name, subnet_id, route_table_id):
-    response = cfn.create_stack(
-        StackName=stack_name,
-        TemplateURL=NAT_CFN_TEMPLATE_URL,
-        OnFailure='DELETE',
-        Parameters=[
-            {
-                'ParameterKey': 'SubnetId',
-                'ParameterValue': subnet_id
-            },
-            {
-                'ParameterKey': 'RouteTableId',
-                'ParameterValue': route_table_id
-            },
-        ],
-    )
-    print(f"Stack creation initiated for {stack_name}: {response}")
+    try:
+        response = cfn.create_stack(
+            StackName=stack_name,
+            TemplateURL=NAT_CFN_TEMPLATE_URL,
+            OnFailure='DELETE',
+            Parameters=[
+                {
+                    'ParameterKey': 'PublicSubnetId',
+                    'ParameterValue': subnet_id,
+                },
+                {
+                    'ParameterKey': 'PrivateSubnetRouteTableId',
+                    'ParameterValue': route_table_id,
+                },
+            ],
+            Tags=[
+                {
+                    'Key': 'elastio:resource',
+                    'Value': 'true',
+                },
+            ]
+        )
+        print(f"Stack creation initiated for {stack_name}: {response}")
+    except cfn.exceptions.AlreadyExistsException:
+        print(f"Stack {stack_name} already exists")
 
 
-def choose_subnet_for_nat(subnets, public_subnets_ids, instance_subnet_id):
+def choose_subnet_for_nat(subnets, public_subnets_ids, instance_subnet_id, vpc_id):
+    nat_deployments = list(get_nat_deployments(subnets))
+    print("nat_deployments:", nat_deployments)
+
     instance_az = subnets[instance_subnet_id]['AvailabilityZone']
 
-    for subnet_id, subnet in subnets.items():
-        if subnet_id not in public_subnets_ids:
-            continue
-        if subnet['AvailabilityZone'] != instance_az:
+    for nat_deployment in nat_deployments:
+        if nat_deployment.vpc_id == vpc_id and nat_deployment.az == instance_az:
+            print(f"Found already existing NAT deployment: {nat_deployment}")
+            return nat_deployment.subnet_id
+
+    print(f"No existing deployments found for {vpc_id}/{instance_az}")
+
+    for subnet_id in sorted(list(public_subnets_ids)):
+        if subnets[subnet_id]['AvailabilityZone'] != instance_az:
             continue
         return subnet_id
+    return None
 
 
 def get_public_subnets(subnet_to_route_table, route_tables):
@@ -223,77 +253,93 @@ def get_all_traffic_route(route_table):
 
 
 def cleanup_nat(current_instance_id, event_time):
+    subnets = {sn['SubnetId']: sn for sn in request(
+        ec2,
+        'describe_subnets',
+        'Subnets',
+    )}
+    print("subnets:", subnets)
+
+    nat_deployments = list(get_nat_deployments(subnets))
+    print("nat_deployments:", nat_deployments)
+
+    if len(nat_deployments) == 0:
+        print("No NAT Gateway deployments found; nothing to do.")
+        return
+
     elastio_instances = {instance['InstanceId']: instance for instance in request(
         ec2,
         'describe_instances',
         'Reservations[].Instances[]',
         Filters=[{'Name': 'tag:elastio:resource', 'Values': ['true']}],
     )}
-
-    active_instances_count = sum(
-        1 for instance in elastio_instances.values()
-        if instance['State']['Name'] in ('pending', 'running', 'stopping', 'shutting-down')
-    )
-
-    if active_instances_count > 0:
-        print(f"Found {active_instances_count} running/pending/stopping elastio instances;"
-              " skipping NAT gateway stack deletion.")
-        return
-
-    print("No elastio instances found.")
+    print("elastio_instances:", elastio_instances)
 
     try:
-        pending_cleanups = pending_cleanups_vpc_ids(
+        pending_cleanups = get_pending_cleanups(
+            subnets,
             elastio_instances,
             current_instance_id,
             event_time,
         )
+        print("pending_cleanups:", pending_cleanups)
     except Exception as e:
         print("Failed to list pending cleanups; assuming there are none", e)
-        pending_cleanups = set()
+        pending_cleanups = {}
 
-    vpcs = request(
-        ec2,
-        'describe_vpcs',
-        'Vpcs'
-    )
+    def instance_az(inst):
+        return subnets.get(inst['SubnetId'], {}).get('AvailabilityZone')
 
-    for vpc in vpcs:
-        vpc_id = vpc['VpcId']
-        stack_name = f"{NAT_CFN_PREFIX}{vpc_id}"
+    active_statuses = ('pending', 'running', 'stopping', 'shutting-down')
 
-        if vpc_id in pending_cleanups:
-            print(f"There is a more recent cleanup pending for stack {stack_name}; skipping.")
+    for nat_deployment in nat_deployments:
+        nat_vpc_id = nat_deployment.vpc_id
+        nat_az = nat_deployment.az
+
+        active_instances = (
+            instance for instance in elastio_instances.values()
+            if (instance['State']['Name'] in active_statuses
+                and
+                instance['VpcId'] == nat_vpc_id
+                and
+                instance_az(instance) == nat_az)
+        )
+
+        if next(active_instances, None) is not None:
+            statuses = '/'.join(active_statuses)
+            print(f"Found {statuses} elastio instances in {nat_vpc_id}/{nat_az};"
+                  f" skipping NAT gateway stack deletion.")
             continue
 
+        print(f"No elastio instances found in {nat_vpc_id}/{nat_az}")
+
+        if pending_cleanups.contains(nat_vpc_id, nat_az):
+            print(f"There is a more recent cleanup pending for {nat_vpc_id}/{nat_az}; skipping.")
+            continue
+
+        stack_name = f"{NAT_CFN_PREFIX}{nat_deployment.subnet_id}"
+
         if is_stack_needs_to_be_deleted(stack_name):
-            print(f"Initiating deletion of NAT gateway stack '{stack_name}' for {vpc_id}.")
+            print(f"Initiating deletion of NAT gateway stack '{stack_name}' for {nat_vpc_id}/{nat_az}.")
             delete_nat_gateway_stack(stack_name)
 
 
-def pending_cleanups_vpc_ids(elastio_instances, current_instance_id, event_time):
+def get_pending_cleanups(subnets, elastio_instances, current_instance_id, event_time):
     """
-    Returns VPC IDs for which there are more recent pending cleanup tasks in
-    the state machine, currently waiting for the quiescent period.
-    In other words, it returns IDs of the VPCs we should skip the cleanup for,
-    because it will be soon handled by a more recent event.
+    Returns a map { vpc_id => [availability_zone] } for which there are more recent
+    pending cleanup tasks in the state machine, currently waiting for the quiescent period.
+    In other words, it returns availability zones of VPCs we should skip the cleanup for,
+    because they will be soon handled by a more recent event.
     """
-    state_machine_arn = request(
-        cfn,
-        'describe_stacks',
-        "Stacks[].Outputs[?OutputKey=='natGatewayCleanupStateMachineArn'][].OutputValue",
-        StackName=LAMBDA_STACK_ID,
-    )[0]
-
     execution_arns = request(
         sfn,
         'list_executions',
         'executions[].executionArn',
-        stateMachineArn=state_machine_arn,
+        stateMachineArn=STATE_MACHINE_ARN,
         statusFilter='RUNNING',
     )
 
-    vpc_ids = set()
+    pending_cleanups = PendingCleanups()
 
     for execution_arn in execution_arns:
         execution = sfn.describe_execution(
@@ -309,16 +355,23 @@ def pending_cleanups_vpc_ids(elastio_instances, current_instance_id, event_time)
 
         # if the instance event of the execution is older than one we
         # are currently handling, then we should do the cleanup, so
-        # we don't add the vpc id to the set
+        # we don't add the vpc/az to the set
         if event_time is not None and exec_time < event_time:
             continue
 
-        if instance_id in elastio_instances:
-            vpc_id = elastio_instances[instance_id]['VpcId']
-            vpc_ids.add(vpc_id)
+        instance = elastio_instances.get(instance_id)
+        if instance is None:
+            continue
 
-    print("pending vpc_ids:", vpc_ids)
-    return vpc_ids
+        subnet = subnets.get(instance['SubnetId'])
+        if subnet is None:
+            continue
+
+        vpc_id = subnet['VpcId']
+        az = subnet['AvailabilityZone']
+        pending_cleanups.add(vpc_id, az)
+
+    return pending_cleanups
 
 
 def is_stack_needs_to_be_deleted(stack_name):
@@ -344,5 +397,66 @@ def is_stack_needs_to_be_deleted(stack_name):
 
 
 def delete_nat_gateway_stack(stack_name):
-    response = cfn.delete_stack(StackName=stack_name)
-    print(f"Stack deletion initiated for {stack_name}:", response)
+    try:
+        response = cfn.delete_stack(StackName=stack_name)
+        print(f"Stack deletion initiated for {stack_name}:", response)
+    except cfn.exceptions.ClientError as e:
+        if 'does not exist' in str(e):
+            print(f"Stack {stack_name} does not exist anymore")
+        else:
+            print(f"Failed to delete stack {stack_name}", e)
+
+
+def get_nat_deployments(subnets):
+    nat_gateways = request(
+        ec2,
+        'describe_nat_gateways',
+        'NatGateways',
+        Filters=[
+            {
+                'Name': 'tag-key',
+                'Values': ['elastio:nat-provision-stack-id']
+            },
+            {
+                'Name': 'state',
+                'Values': ['pending', 'failed', 'available', 'deleting'],
+            },
+        ],
+    )
+    for nat in nat_gateways:
+        subnet_id = nat['SubnetId']
+        subnet = subnets.get(subnet_id)
+        if subnet is None:
+            continue
+        vpc_id = subnet['VpcId']
+        az = subnet['AvailabilityZone']
+        stack_id = next(
+            tag['Value'] for tag in nat['Tags']
+            if tag['Key'] == 'elastio:nat-provision-stack-id'
+        )
+        yield NatDeployment(stack_id, vpc_id, subnet_id, az)
+
+
+@dataclass
+class NatDeployment:
+    stack_id: str
+    vpc_id: str
+    subnet_id: str
+    az: str
+
+
+class PendingCleanups:
+    def __init__(self):
+        self.vpc_id_to_zones = {}
+
+    def __str__(self):
+        return str(self.vpc_id_to_zones)
+
+    def add(self, vpc_id, availability_zone):
+        zones = self.vpc_id_to_zones.pop(vpc_id, set())
+        zones.add(availability_zone)
+        self.vpc_id_to_zones[vpc_id] = zones
+
+    def contains(self, vpc_id, availability_zone):
+        zones = self.vpc_id_to_zones.get(vpc_id, set())
+        return availability_zone in zones

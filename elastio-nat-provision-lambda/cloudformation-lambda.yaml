@@ -20,7 +20,7 @@ Parameters:
     Type: String
     Default: elastio-nat-gateway-
     MinLength: 1
-    Description: Prefix of the name of the NAT Gateway CFN stack. The name will be <prefix><vpc-id>
+    Description: Prefix of the name of the NAT Gateway CFN stack. The name will be <prefix><public-subnet-id>
   LambdaMemorySize:
     Type: Number
     Default: 512

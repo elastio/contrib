@@ -303,6 +303,10 @@ def cleanup_nat(current_instance_id, event_time):
             # It isn't present in case if the instance is in shutting-down state,
             # for example (seen during testing). Maybe there are some other cases
             # where VpcId isn't present, so we gracefully default to `None`.
+            #
+            # If `VpcId` isn't present it probably means the Instance no longer
+            # has any network interfaces attached to it, so it's safe to assume
+            # the instance is not active and doesn't use network for cleanup.
             if (instance['State']['Name'] in active_statuses
                 and
                 instance.get('VpcId', None) == nat_vpc_id

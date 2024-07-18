@@ -305,7 +305,7 @@ def cleanup_nat(current_instance_id, event_time):
             # where VpcId isn't present, so we gracefully default to `None`.
             if (instance['State']['Name'] in active_statuses
                 and
-                instance.get(['VpcId'], None) == nat_vpc_id
+                instance.get('VpcId', None) == nat_vpc_id
                 and
                 instance_az(instance) == nat_az)
         )

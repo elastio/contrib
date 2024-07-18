@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/goformation/master/schema/cloudformation.schema.json
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploys a single NAT Gateway
+
+Parameters:
+  PublicSubnetId:
+    Type: String
+    Description: ID of a public subnet where the NAT Gateway will be deployed
+  PrivateSubnetRouteTableId:
+    Type: String
+    Description: >
+      ID of a route table associated with the private subnet that will be modified to forward internet
+      traffic through NAT
+
+Resources:
+  eip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+        - Key: elastio:nat-provision-stack-id
+          Value: !Ref AWS::StackId
+
+  nat:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt eip.AllocationId
+      SubnetId: !Ref PublicSubnetId
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+        - Key: elastio:nat-provision-stack-id
+          Value: !Ref AWS::StackId
+
+  route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateSubnetRouteTableId
+      DestinationCidrBlock: '0.0.0.0/0'
+      NatGatewayId: !Ref nat
+
+Outputs:
+  templateVersion:
+    Value: {{VERSION}}
+  eipAllocationId:
+    Value: !GetAtt eip.AllocationId
+  natGatewayId:
+    Value: !Ref nat

@@ -15,6 +15,11 @@ NAT_CFN_PREFIX = os.environ['NAT_CFN_PREFIX']
 NAT_CFN_TEMPLATE_URL = os.environ['NAT_CFN_TEMPLATE_URL']
 STATE_MACHINE_ARN = os.environ['STATE_MACHINE_ARN']
 
+def to_json(value):
+    return json.dumps(value, indent=2)
+
+def print_json(label: str, value):
+    print(to_json({ label: value }))
 
 def lambda_handler(event, _context):
     print(f"boto3 version: {boto3.__version__}")
@@ -258,10 +263,10 @@ def cleanup_nat(current_instance_id, event_time):
         'describe_subnets',
         'Subnets',
     )}
-    print("subnets:", subnets)
+    print_json("subnets", subnets)
 
     nat_deployments = list(get_nat_deployments(subnets))
-    print("nat_deployments:", nat_deployments)
+    print_json("nat_deployments", nat_deployments)
 
     if len(nat_deployments) == 0:
         print("No NAT Gateway deployments found; nothing to do.")
@@ -273,7 +278,7 @@ def cleanup_nat(current_instance_id, event_time):
         'Reservations[].Instances[]',
         Filters=[{'Name': 'tag:elastio:resource', 'Values': ['true']}],
     )}
-    print("elastio_instances:", elastio_instances)
+    print_json('elastio_instances', elastio_instances)
 
     try:
         pending_cleanups = get_pending_cleanups(
@@ -282,13 +287,10 @@ def cleanup_nat(current_instance_id, event_time):
             current_instance_id,
             event_time,
         )
-        print("pending_cleanups:", pending_cleanups)
+        print_json("pending_cleanups", pending_cleanups)
     except Exception as e:
         print("Failed to list pending cleanups; assuming there are none", e)
-        pending_cleanups = {}
-
-    def instance_az(inst):
-        return subnets.get(inst['SubnetId'], {}).get('AvailabilityZone')
+        pending_cleanups = PendingCleanups()
 
     active_statuses = ('pending', 'running', 'stopping')
 
@@ -299,7 +301,7 @@ def cleanup_nat(current_instance_id, event_time):
         active_instances = (
             instance for instance in elastio_instances.values()
 
-            # VpcId is not always present in the instance object.
+            # VpcId and SubnetId are not always present in the instance object.
             # It isn't present in case if the instance is in shutting-down state,
             # for example (seen during testing). Maybe there are some other cases
             # where VpcId isn't present, so we gracefully default to `None`.
@@ -307,17 +309,23 @@ def cleanup_nat(current_instance_id, event_time):
             # If `VpcId` isn't present it probably means the Instance no longer
             # has any network interfaces attached to it, so it's safe to assume
             # the instance is not active and doesn't use network for cleanup.
-            if (instance['State']['Name'] in active_statuses
+            if (
+                instance['State']['Name'] in active_statuses
                 and
                 instance.get('VpcId', None) == nat_vpc_id
                 and
-                instance_az(instance) == nat_az)
+                instance.get('Placement', {}).get('AvailabilityZone', None) == nat_az
+            )
         )
 
-        if next(active_instances, None) is not None:
-            statuses = '/'.join(active_statuses)
-            print(f"Found {statuses} elastio instances in {nat_vpc_id}/{nat_az};"
-                  f" skipping NAT gateway stack deletion.")
+        active_instance = next(active_instances, None)
+
+        if active_instance is not None:
+            print(
+                f"Found active elastio EC2 instance in {nat_vpc_id}/{nat_az};"
+                f" skipping NAT gateway stack deletion."
+                f" Instance: {to_json(active_instance)}"
+            )
             continue
 
         print(f"No elastio instances found in {nat_vpc_id}/{nat_az}")
@@ -333,7 +341,12 @@ def cleanup_nat(current_instance_id, event_time):
             delete_nat_gateway_stack(stack_name)
 
 
-def get_pending_cleanups(subnets, elastio_instances, current_instance_id, event_time):
+def get_pending_cleanups(
+    subnets: dict[str, dict],
+    elastio_instances,
+    current_instance_id,
+    event_time,
+):
     """
     Returns a map { vpc_id => [availability_zone] } for which there are more recent
     pending cleanup tasks in the state machine, currently waiting for the quiescent period.
@@ -372,13 +385,24 @@ def get_pending_cleanups(subnets, elastio_instances, current_instance_id, event_
         if instance is None:
             continue
 
-        subnet = subnets.get(instance['SubnetId'])
-        if subnet is None:
+        instance_az = instance.get('Placement', {}).get('AvailabilityZone')
+
+        if instance_az is None:
+            print(
+                f"WARN: Instance doesn't have an availability zone:"
+                f" {to_json(instance)}. Ignoring it..."
+            )
             continue
 
-        vpc_id = subnet['VpcId']
-        az = subnet['AvailabilityZone']
-        pending_cleanups.add(vpc_id, az)
+        subnets_in_instance_az = filter(
+            lambda subnet: subnet['AvailabilityZone'] == instance_az,
+            subnets.values()
+        )
+
+        for subnet in subnets_in_instance_az:
+            vpc_id = subnet['VpcId']
+            az = subnet['AvailabilityZone']
+            pending_cleanups.add(vpc_id, az)
 
     return pending_cleanups
 
@@ -444,7 +468,6 @@ def get_nat_deployments(subnets):
             if tag['Key'] == 'elastio:nat-provision-stack-id'
         )
         yield NatDeployment(stack_id, vpc_id, subnet_id, az)
-
 
 @dataclass
 class NatDeployment:

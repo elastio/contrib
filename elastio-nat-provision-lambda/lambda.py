@@ -290,7 +290,7 @@ def cleanup_nat(current_instance_id, event_time):
     def instance_az(inst):
         return subnets.get(inst['SubnetId'], {}).get('AvailabilityZone')
 
-    active_statuses = ('pending', 'running', 'stopping', 'shutting-down')
+    active_statuses = ('pending', 'running', 'stopping')
 
     for nat_deployment in nat_deployments:
         nat_vpc_id = nat_deployment.vpc_id
@@ -298,9 +298,14 @@ def cleanup_nat(current_instance_id, event_time):
 
         active_instances = (
             instance for instance in elastio_instances.values()
+
+            # VpcId is not always present in the instance object.
+            # It isn't present in case if the instance is in shutting-down state,
+            # for example (seen during testing). Maybe there are some other cases
+            # where VpcId isn't present, so we gracefully default to `None`.
             if (instance['State']['Name'] in active_statuses
                 and
-                instance['VpcId'] == nat_vpc_id
+                instance.get(['VpcId'], None) == nat_vpc_id
                 and
                 instance_az(instance) == nat_az)
         )

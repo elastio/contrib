@@ -3,12 +3,12 @@
 # Upload the templates into your S3 bucket for testing
 # Use this script like this:
 # ```bash
-# S3_BUCKET=bucket LINK_PARAMS='&param_DeleteQuiescentPeriodSeconds=5' ./elastio-nat-provision-lambda/upload.sh
+# S3_BUCKET_PREFIX=bucket LINK_PARAMS='&param_DeleteQuiescentPeriodSeconds=5' ./elastio-nat-provision-lambda/upload.sh
 # ```
 
 set -euxo pipefail
 
-s3_prefix=contrib/elastio-nat-provision-lambda
+s3_key_prefix=contrib/elastio-nat-provision-lambda
 
 trap cleanup SIGINT SIGTERM ERR EXIT
 
@@ -40,12 +40,11 @@ cd "$temp_dir"
 # Using `|` separator instead of `/` for prefix, because prefix
 # by itself contains a `/`
 sed -i ./*.yaml \
-    -e "s/{{AWS_REGION}}/$AWS_REGION/g" \
-    -e "s/{{S3_BUCKET}}/$S3_BUCKET/g" \
-    -e "s|{{S3_PREFIX}}|$s3_prefix|g" \
+    -e "s/{{S3_BUCKET_PREFIX}}/$S3_BUCKET_PREFIX/g" \
+    -e "s|{{S3_KEY_PREFIX}}|$s3_key_prefix|g" \
     -e "s/{{VERSION}}/$version/g"
 
-aws s3 cp --recursive ./ "s3://${S3_BUCKET}/${s3_prefix}/${version}/"
+aws s3 cp --recursive ./ "s3://$S3_BUCKET_PREFIX-$AWS_REGION/${s3_key_prefix}/${version}/"
 
 # Skip opening the link if we're on CI
 if [[ -v CI ]]; then
@@ -55,8 +54,8 @@ fi
 cfn_deep_link_parts=(
     "https://$AWS_REGION.console.aws.amazon.com/cloudformation/home"
     "?region=$AWS_REGION#/stacks/create/review?templateURL="
-    "https://$S3_BUCKET.s3.$AWS_REGION.amazonaws.com/"
-    "$s3_prefix/$version/cloudformation-lambda.yaml"
+    "https://$S3_BUCKET_PREFIX-$AWS_REGION.s3.$AWS_REGION.amazonaws.com/"
+    "$s3_key_prefix/$version/cloudformation-lambda.yaml"
     "&stackName=elastio-nat-provision-lambda"
     "${LINK_PARAMS:-}"
 )

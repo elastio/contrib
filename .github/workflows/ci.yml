@@ -103,7 +103,7 @@ jobs:
         needs.changes.outputs.ci == 'true'
       )
     env:
-      S3_BUCKET: elastio-prod-artifacts-us-east-2
+      S3_BUCKET_PREFIX: elastio-prod-artifacts
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

@@ -153,11 +153,11 @@ Resources:
       Environment:
         Variables:
           NAT_CFN_PREFIX: !Ref NatGatewayStackPrefix
-          NAT_CFN_TEMPLATE_URL: https://{{S3_BUCKET}}.s3.{{AWS_REGION}}.amazonaws.com/{{S3_PREFIX}}/{{VERSION}}/cloudformation-nat.yaml
+          NAT_CFN_TEMPLATE_URL: !Sub https://{{S3_BUCKET_PREFIX}}-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/{{S3_KEY_PREFIX}}/{{VERSION}}/cloudformation-nat.yaml
           STATE_MACHINE_ARN: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:elastio-nat-gateway-provision-state-machine'
       Code:
-        S3Bucket: {{S3_BUCKET}}
-        S3Key: {{S3_PREFIX}}/{{VERSION}}/lambda.zip
+        S3Bucket: !Sub '{{S3_BUCKET_PREFIX}}-${AWS::Region}'
+        S3Key: {{S3_KEY_PREFIX}}/{{VERSION}}/lambda.zip
 
   pendingInstancesSubscription:
     Type: AWS::Events::Rule

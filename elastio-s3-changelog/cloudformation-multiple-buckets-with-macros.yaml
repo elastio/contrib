@@ -46,7 +46,7 @@ Resources:
             EnableQrts: !Ref EnableQrts
             QrtsBatchSize: !Ref QrtsBatchSize
             QrtsMaxDelay: !Ref QrtsMaxDelay
-          TemplateURL: https://{{S3_BUCKET}}.s3.{{AWS_REGION}}.amazonaws.com/{{S3_PREFIX}}/{{VERSION}}/cloudformation-single-bucket.yaml
+          TemplateURL: !Sub https://{{S3_BUCKET_PREFIX}}-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/{{S3_KEY_PREFIX}}/{{VERSION}}/cloudformation-single-bucket.yaml
 Outputs:
   templateVersion:
     Value: "{{VERSION}}"

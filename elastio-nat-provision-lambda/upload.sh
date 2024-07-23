@@ -8,6 +8,8 @@
 
 set -euxo pipefail
 
+export AWS_PAGER=""
+
 s3_key_prefix=contrib/elastio-nat-provision-lambda
 
 trap cleanup SIGINT SIGTERM ERR EXIT
@@ -24,8 +26,6 @@ function cleanup {
 
     rm -rf "$temp_dir"
 }
-
-cd elastio-nat-provision-lambda
 
 version=$(cat version)
 
@@ -45,6 +45,15 @@ sed -i ./*.yaml \
     -e "s/{{VERSION}}/$version/g"
 
 aws s3 cp --recursive ./ "s3://$S3_BUCKET_PREFIX-$AWS_REGION/${s3_key_prefix}/${version}/"
+
+
+if [[ -v UPDATE_LAMBDA_ONLY ]]; then
+    aws lambda update-function-code \
+        --function-name elastio-nat-gateway-provision \
+        --s3-bucket "$S3_BUCKET_PREFIX-$AWS_REGION" \
+        --s3-key "$s3_key_prefix/$version/lambda.zip"
+    exit 0
+fi
 
 # Skip opening the link if we're on CI
 if [[ -v CI ]]; then

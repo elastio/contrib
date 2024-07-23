@@ -1,19 +1,27 @@
 from dataclasses import dataclass, asdict, is_dataclass
 from datetime import datetime
+from typing import Iterable, Optional, TYPE_CHECKING, TypedDict
+
+if TYPE_CHECKING:
+    from mypy_boto3_ec2.type_defs import SubnetTypeDef, InstanceTypeDef
+    from mypy_boto3_ecs.type_defs import TaskTypeDef
+
 import json
 import os
 import time
-
+import itertools
 import boto3
 import botocore
 
 cfn = boto3.client('cloudformation')
 ec2 = boto3.client('ec2')
+ecs = boto3.client('ecs')
 sfn = boto3.client('stepfunctions')
 
 NAT_CFN_PREFIX = os.environ['NAT_CFN_PREFIX']
 NAT_CFN_TEMPLATE_URL = os.environ['NAT_CFN_TEMPLATE_URL']
 STATE_MACHINE_ARN = os.environ['STATE_MACHINE_ARN']
+LAMBDA_NAME = os.environ['AWS_LAMBDA_FUNCTION_NAME']
 
 # It's not possible to serialize dataclasses with the default JSON encoder.
 # The reason Python restricts this is apparently to avoid confusion that
@@ -41,22 +49,107 @@ def to_json(value):
 def print_json(label: str, value):
     print(to_json({ label: value }))
 
+type AnyEvent = Ec2Event | EcsEvent | ScheduleEvent
+type WorkloadEvent = Ec2Event | EcsEvent
+
+@dataclass
+class Ec2Event:
+    time: datetime
+    ec2_instance_id: str
+
+@dataclass
+class EcsEvent:
+    time: datetime
+    ecs_task_arn: str
+    ecs_cluster_arn: str
+    subnet_id: str
+    status: str
+
+@dataclass
+class ScheduleEvent:
+    pass
+
+
 def lambda_handler(event, _context):
     print_json("boto3_version", boto3.__version__)
     print_json("botocore_version", botocore.__version__)
     print_json("event", event)
 
-    if bool(event.get('elastio_scheduled_cleanup')):
-        cleanup_nat(None, None)
-    else:
-        instance_id = event['detail']['instance-id']
-        instance_state = event['detail']['state']
-        event_time = datetime.fromisoformat(event['time'])
+    match event:
+        case { 'elastio_scheduled_cleanup': True }:
+            cleanup_nat(ScheduleEvent())
 
-        if instance_state == 'pending':
-            ensure_nat(instance_id)
-        elif instance_state in ('stopped', 'terminated'):
-            cleanup_nat(instance_id, event_time)
+        case { 'source': 'aws.ecs' }:
+            handle_raw_ecs_event(event)
+
+        case { 'source': 'aws.ec2' }:
+            handle_raw_ec2_event(event)
+
+        case _:
+            raise Exception(f"Unknown event received")
+
+def handle_raw_ecs_event(event: dict):
+    detail = event['detail']
+    ecs_task_status = detail['lastStatus']
+
+    subnet_id = get_ecs_task_subnet_id(detail)
+
+    if subnet_id is None:
+        raise Exception(f"No subnet ID information in the ECS event")
+
+    ecs_event = EcsEvent(
+        time=datetime.fromisoformat(event['time']),
+        ecs_task_arn=detail['taskArn'],
+        ecs_cluster_arn=detail['clusterArn'],
+        subnet_id=subnet_id,
+        status=ecs_task_status,
+    )
+
+    match ecs_task_status:
+        case 'STOPPED':
+            cleanup_nat(ecs_event)
+        case 'PROVISIONING':
+            ensure_nat(ecs_event)
+        case _:
+            raise Exception(f"Unexpected ECS task status: {ecs_task_status}")
+
+def handle_raw_ec2_event(event: dict):
+    detail = event['detail']
+    ec2_instance_state = detail['state']
+    ec2_event = Ec2Event(
+        time=datetime.fromisoformat(event['time']),
+        ec2_instance_id=detail['instance-id'],
+    )
+
+    match ec2_instance_state:
+        case 'pending':
+            ensure_nat(ec2_event)
+        case 'stopped' | 'terminated':
+            cleanup_nat(ec2_event)
+        case _:
+            raise Exception(f"Unexpected EC2 instance state: {ec2_instance_state}")
+
+def get_ecs_task_subnet_id(ecs_task: 'TaskTypeDef') -> Optional[str]:
+    eni = next(
+        (
+            attachment
+            for attachment in ecs_task['attachments']
+            if (attachment['type'] == 'eni' or attachment['type'] == 'ElasticNetworkInterface')
+        ),
+        None
+    )
+
+    if eni is None:
+        return None;
+
+    return next(
+        (
+            detail['value']
+            for detail in eni['details']
+            if detail['name'] == 'subnetId'
+        ),
+        None
+    )
 
 
 def request(client, operation, query, **kwargs):
@@ -69,33 +162,79 @@ def request(client, operation, query, **kwargs):
     filtered = page_iter.search(query)
     return list(filtered)
 
+def get_workload(event: WorkloadEvent) -> Optional['Workload']:
+    if isinstance(event, Ec2Event):
+        return get_ec2_workload(event)
 
-def ensure_nat(instance_id):
-    instance = request(
-        ec2,
-        'describe_instances',
-        'Reservations[].Instances[]',
-        InstanceIds=[instance_id],
-    )[0]
+    if isinstance(event, EcsEvent):
+        return get_ecs_workload(event)
 
-    print_json("instance", instance)
+    raise Exception(f"Unknown workload event type: {event}")
 
-    instance_vpc_id = instance['VpcId']
-    instance_subnet_id = instance['SubnetId']
-    instance_tags = instance['Tags']
+def get_ec2_workload(event: Ec2Event) -> Optional['Ec2Workload']:
+    response = ec2.describe_instances(
+        InstanceIds=[event.ec2_instance_id],
+    )
 
-    if not any(
-            tag['Key'] == 'elastio:resource' and tag['Value'] == 'true'
-            for tag in instance_tags
-    ):
-        print(f"No matching elastio:resource tag found on instance {instance_id}; no action taken.")
+    print_json("ec2_workload_instance_response", response)
+
+    ec2_instance = response['Reservations'][0]['Instances'][0]
+
+    is_elastio_resource = any(
+        tag['Key'] == 'elastio:resource' and tag['Value'] == 'true'
+        for tag in ec2_instance['Tags']
+    )
+
+    if not is_elastio_resource:
+        print(
+            f"No 'elastio:resource=true' tag found on EC2 instance "
+            f"{event.ec2_instance_id}; no action taken."
+        )
+        return None
+
+    return Ec2Workload.from_aws_api(ec2_instance)
+
+def get_ecs_workload(event: EcsEvent) -> Optional['EcsWorkload']:
+    response = ec2.describe_subnets(
+        SubnetIds=[event.subnet_id],
+    )
+
+    print_json("ecs_workload_subnet_response", response)
+
+    subnet = response['Subnets'][0]
+
+    return EcsWorkload(
+        subnet_id=event.subnet_id,
+        vpc_id=subnet['VpcId'],
+        az=subnet['AvailabilityZone'],
+        ecs_task_arn=event.ecs_task_arn,
+        ecs_cluster_arn=event.ecs_cluster_arn,
+        status=event.status,
+    )
+
+
+def ensure_nat(event: WorkloadEvent):
+    workload = get_workload(event)
+
+    print_json("discovered_workload", workload)
+
+    if workload is None:
         return
+
+    if workload.vpc_id is None:
+        raise Exception(f"VPC ID is not known for the workload: {to_json(workload)}")
+        return
+
+    if workload.subnet_id is None:
+        raise Exception(f"Subnet ID is not known for the workload: {to_json(workload)}")
+        return
+
 
     subnets = {sn['SubnetId']: sn for sn in request(
         ec2,
         'describe_subnets',
         'Subnets',
-        Filters=[{'Name': 'vpc-id', 'Values': [instance_vpc_id]}],
+        Filters=[{'Name': 'vpc-id', 'Values': [workload.vpc_id]}],
     )}
     print_json("subnets", subnets)
 
@@ -103,7 +242,7 @@ def ensure_nat(instance_id):
         ec2,
         'describe_route_tables',
         'RouteTables',
-        Filters=[{'Name': 'vpc-id', 'Values': [instance_vpc_id]}],
+        Filters=[{'Name': 'vpc-id', 'Values': [workload.vpc_id]}],
     )}
     print_json("route_tables", route_tables)
 
@@ -125,26 +264,28 @@ def ensure_nat(instance_id):
     public_subnets_ids = set(get_public_subnets(subnet_to_route_table, route_tables))
     print_json("public_subnets_ids", public_subnets_ids)
 
-    instance_route_table_id = subnet_to_route_table[instance_subnet_id]
-    instance_route_table = route_tables[instance_route_table_id]
+    workload_route_table_id = subnet_to_route_table[workload.subnet_id]
+    workload_route_table = route_tables[workload_route_table_id]
 
     if not public_subnets_ids:
-        print(f"No public subnets found in {instance_vpc_id}; exiting")
+        print(f"No public subnets found in {workload.vpc_id}; exiting")
         return
 
-    if instance_subnet_id in public_subnets_ids:
-        if not subnets[instance_subnet_id]['MapPublicIpOnLaunch']:
-            print("WARN: Instance is launched in a public subnet, but the subnet has"
-                  " `MapPublicIpOnLaunch` set to `false`. In order for Elastio workers"
-                  " to be able to access internet, `MapPublicIpOnLaunch` must be set to `true`.")
+    if workload.subnet_id in public_subnets_ids:
+        if not subnets[workload.subnet_id]['MapPublicIpOnLaunch']:
+            print(
+                "WARN: Workload was launched in a public subnet, but the subnet has"
+                " `MapPublicIpOnLaunch` set to `false`. In order for Elastio workers"
+                " to be able to access internet, `MapPublicIpOnLaunch` must be set to `true`."
+            )
         else:
-            print("Instance is running in a public subnet; exiting")
+            print("Workload is running in a public subnet; exiting")
         return
 
     nat_deployments = list(get_nat_deployments(subnets))
     print_json("nat_deployments", nat_deployments)
 
-    all_traffic_route = get_all_traffic_route(instance_route_table)
+    all_traffic_route = get_all_traffic_route(workload_route_table)
 
     if all_traffic_route is not None:
         nat_gateway_id = all_traffic_route.get('NatGatewayId', None)
@@ -166,8 +307,7 @@ def ensure_nat(instance_id):
         nat_deployments,
         subnets,
         public_subnets_ids,
-        instance_subnet_id,
-        instance_vpc_id,
+        workload,
     )
 
     if nat_subnet_id is None:
@@ -180,7 +320,7 @@ def ensure_nat(instance_id):
 
     if not is_stack_deployed(stack_name):
         print(f"No existing stack '{stack_name}' found, deploying new stack")
-        deploy_nat_stack(stack_name, nat_subnet_id, instance_route_table_id)
+        deploy_nat_stack(stack_name, nat_subnet_id, workload_route_table_id)
     else:
         print(f"Stack {stack_name} already exists or is in progress; nothing more to do.")
 
@@ -261,6 +401,10 @@ def deploy_nat_stack(stack_name, subnet_id, route_table_id):
                     'Key': 'elastio:resource',
                     'Value': 'true',
                 },
+                {
+                    'Key': 'elastio:created-by',
+                    'Value': f'lambda:{LAMBDA_NAME}',
+                }
             ]
         )
         print(f"Stack creation initiated for {stack_name}: {to_json(response)}")
@@ -270,22 +414,19 @@ def deploy_nat_stack(stack_name, subnet_id, route_table_id):
 
 def choose_subnet_for_nat(
     nat_deployments: list['NatDeployment'],
-    subnets,
-    public_subnets_ids,
-    instance_subnet_id,
-    vpc_id
+    subnets: dict,
+    public_subnets_ids: set[str],
+    workload: 'Workload',
 ):
-    instance_az = subnets[instance_subnet_id]['AvailabilityZone']
-
     for nat_deployment in nat_deployments:
-        if nat_deployment.vpc_id == vpc_id and nat_deployment.az == instance_az:
+        if nat_deployment.vpc_id == workload.vpc_id and nat_deployment.az == workload.az:
             print(f"Found already existing NAT deployment: {to_json(nat_deployment)}")
             return nat_deployment.subnet_id
 
-    print(f"No existing deployments found for {vpc_id}/{instance_az}")
+    print(f"No existing deployments found for {workload.vpc_id}/{workload.az}")
 
     for subnet_id in sorted(list(public_subnets_ids)):
-        if subnets[subnet_id]['AvailabilityZone'] != instance_az:
+        if subnets[subnet_id]['AvailabilityZone'] != workload.az:
             continue
         return subnet_id
     return None
@@ -298,6 +439,7 @@ def get_public_subnets(subnet_to_route_table, route_tables):
         route = get_all_traffic_route(route_table)
         if route is None:
             continue
+
         if not route['State'] == 'active':
             continue
 
@@ -314,13 +456,111 @@ def get_all_traffic_route(route_table):
             return route
     return None
 
+def list_workloads(subnets: dict[str, 'SubnetTypeDef']) -> dict[str, 'Workload']:
+    workloads: dict[str, 'Workload'] = {
+        **list_ec2_instances(),
+        **list_ecs_tasks(subnets),
+    }
 
-def cleanup_nat(current_instance_id, event_time):
-    subnets = {sn['SubnetId']: sn for sn in request(
-        ec2,
-        'describe_subnets',
-        'Subnets',
-    )}
+    print_json("discovered_workloads", workloads)
+
+    return workloads
+
+def list_ec2_instances() -> dict[str, 'Ec2Workload']:
+    ec2_instances = list(
+        ec2
+        .get_paginator('describe_instances')
+        .paginate(
+            Filters=[
+                { 'Name': 'tag:elastio:resource', 'Values': ['true'] }
+            ]
+        )
+    )
+
+    print_json('ec2_instances', ec2_instances)
+
+    return {
+        instance['InstanceId']: Ec2Workload(
+            subnet_id=instance.get('SubnetId'),
+            vpc_id=instance.get('VpcId'),
+            az=az,
+            ec2_instance_id=instance['InstanceId'],
+            state=instance['State']['Name'],
+        )
+        for page in ec2_instances
+        for reservation in page.get('Reservations', [])
+        for instance in reservation.get('Instances', [])
+        if (az := instance.get('Placement', {}).get('AvailabilityZone')) is not None
+    }
+
+def list_ecs_tasks(subnets: dict[str, 'SubnetTypeDef']) -> dict[str, 'EcsWorkload']:
+    return {
+        task['taskArn']: EcsWorkload(
+            subnet_id=subnet_id,
+            vpc_id=subnets[subnet_id]['VpcId'],
+            az=task['availabilityZone'],
+            ecs_task_arn=task['taskArn'],
+            ecs_cluster_arn=task['clusterArn'],
+            status=task['lastStatus'],
+        )
+        for task in list_ecs_tasks_impl()
+        if (subnet_id := get_ecs_task_subnet_id(task)) in subnets
+    }
+
+def list_ecs_tasks_impl():
+    ecs_clusters = [
+        cluster_arn
+        for cluster in ecs.get_paginator('list_clusters').paginate()
+        for cluster_arn in cluster['clusterArns']
+    ]
+
+    print_json("ecs_clusters", ecs_clusters)
+
+    ecs_clusters_to_tasks = {
+        cluster_arn: task['taskArns']
+            for cluster_arn in ecs_clusters
+            for task in (
+                ecs
+                .get_paginator('list_tasks')
+                .paginate(cluster=cluster_arn, launchType='FARGATE')
+            )
+    }
+
+    print_json("ecs_clusters_to_tasks", ecs_clusters_to_tasks)
+
+    for cluster_arn, task_arns in ecs_clusters_to_tasks.items():
+        if len(task_arns) == 0:
+            continue
+
+        for task_arns_chunk in chunks(task_arns, 100):
+            ecs_tasks = ecs.describe_tasks(
+                cluster=cluster_arn,
+                tasks=task_arns_chunk,
+                include=['TAGS'],
+            )
+
+            print_json("ecs_describe_tasks_response", ecs_tasks)
+
+            failures = ecs_tasks['failures']
+
+            if len(failures) > 0:
+                print(f"WARN: failed to describe some ECS tasks: {to_json(failures)}")
+
+            yield from (
+                task
+                for task in ecs_tasks['tasks']
+                if any(
+                    tag.get('key') == 'elastio:resource' and tag.get('value') == 'true'
+                    for tag in task.get('tags', [])
+                )
+            )
+
+def cleanup_nat(event: AnyEvent):
+    subnets = {
+        subnet['SubnetId']: subnet
+        for page in ec2.get_paginator('describe_subnets').paginate()
+        for subnet in page['Subnets']
+    }
     print_json("subnets", subnets)
 
     nat_deployments = list(get_nat_deployments(subnets))
@@ -330,73 +570,42 @@ def cleanup_nat(current_instance_id, event_time):
         print("No NAT Gateway deployments found; nothing to do.")
         return
 
-    elastio_instances = {instance['InstanceId']: instance for instance in request(
-        ec2,
-        'describe_instances',
-        'Reservations[].Instances[]',
-        Filters=[{'Name': 'tag:elastio:resource', 'Values': ['true']}],
-    )}
-    print_json('elastio_instances', elastio_instances)
+    workloads = list_workloads(subnets)
 
     try:
         pending_cleanups = get_pending_cleanups(
             subnets,
-            elastio_instances,
-            current_instance_id,
-            event_time,
+            workloads,
+            event
         )
-        print_json("pending_cleanups", pending_cleanups)
     except Exception as e:
         print(f"Failed to list pending cleanups; assuming there are none: {repr(e)}")
         pending_cleanups = PendingCleanups()
-
-    active_statuses = ('pending', 'running', 'stopping', 'shutting-down')
 
     for nat_deployment in nat_deployments:
         nat_vpc_id = nat_deployment.vpc_id
         nat_az = nat_deployment.az
 
-        active_instances = (
-            instance for instance in elastio_instances.values()
-
-            # VpcId and SubnetId are not always present in the instance object.
-            # It isn't present in case if the instance is in shutting-down state,
-            # for example (seen during testing). Maybe there are some other cases
-            # where VpcId isn't present, so we gracefully default to `None`.
-            #
-            # If `VpcId` isn't present it probably means the Instance no longer
-            # has any network interfaces attached to it, so it's safe to assume
-            # the instance is not active and doesn't use network for cleanup.
-            if (
-                instance['State']['Name'] in active_statuses
-                and
-                (
-                    # In case when VPC ID of the instance is not known we just
-                    # assume it can potentially be the instance in the VPCs of the NAT
-                    instance.get('VpcId', None) == None
-                    or
-                    instance.get('VpcId', None) == nat_vpc_id
-                )
-                and
-                instance.get('Placement', {}).get('AvailabilityZone', None) == nat_az
-            )
-        )
-
-        active_instance = next(active_instances, None)
-
-        if active_instance is not None:
-            print(
-                f"Found potentially active elastio EC2 instance in {nat_vpc_id}/{nat_az};"
-                f" skipping NAT gateway stack deletion."
-                f" Instance: {to_json(active_instance)}"
-            )
-            continue
-
-        print(f"No elastio instances found in {nat_vpc_id}/{nat_az}")
-
         if pending_cleanups.contains(nat_vpc_id, nat_az):
             print(f"There is a more recent cleanup pending for {nat_vpc_id}/{nat_az}; skipping.")
             continue
+
+        active_workloads = (
+            workload for workload in workloads.values()
+            if workload.is_active_in_vpc_az(nat_vpc_id, nat_az)
+        )
+
+        active_workload = next(active_workloads, None)
+
+        if active_workload is not None:
+            print(
+                f"Found potentially active elastio workload in {nat_vpc_id}/{nat_az};"
+                f" skipping NAT gateway stack deletion."
+                f" Workload: {to_json(active_workload)}"
+            )
+            continue
+
+        print(f"No active elastio workloads found in {nat_vpc_id}/{nat_az}")
 
         stack_name = f"{NAT_CFN_PREFIX}{nat_deployment.subnet_id}"
 
@@ -406,10 +615,9 @@ def cleanup_nat(current_instance_id, event_time):
 
 
 def get_pending_cleanups(
-    subnets: dict[str, dict],
-    elastio_instances,
-    current_instance_id,
-    event_time,
+    subnets: dict[str, 'SubnetTypeDef'],
+    workloads: dict[str, 'Workload'],
+    event: AnyEvent
 ):
     """
     Returns a map { vpc_id => [availability_zone] } for which there are more recent
@@ -425,48 +633,76 @@ def get_pending_cleanups(
         statusFilter='RUNNING',
     )
 
+    # This is the set of cleanups that are more recent than the current event
+    # that we should skip in this run.
     pending_cleanups = PendingCleanups()
+
+    print(f"Discovered SFN execution ARNs: {to_json(execution_arns)}")
 
     for execution_arn in execution_arns:
         execution = sfn.describe_execution(
             executionArn=execution_arn,
         )
+
+        print(f"Discovered SFN execution: {to_json(execution)}")
+
         exec_input = json.loads(execution['input'])
-        instance_id = exec_input['detail']['instance-id']
-        exec_time = datetime.fromisoformat(exec_input['time'])
+
+        sfn_time = datetime.fromisoformat(exec_input['time'])
+
+        workload_id = None
+        workload_az = None
+        match exec_input:
+            case { 'source': 'aws.ecs', 'detail': detail }:
+                workload_id = detail['taskArn']
+                workload_az = detail['availabilityZone']
+
+            case { 'source': 'aws.ec2', 'detail': { 'instance-id': instance_id } }:
+                workload_id = instance_id
+                workload = workloads.get(instance_id)
+                if workload is not None:
+                    workload_az = workload.az
+                else:
+                    print(
+                        f"Can't determine the AZ of the EC2 instance from the event "
+                        f"in SFN, because EC2 instance info is no longer returned from "
+                        f"the DescribeInstances API: {instance_id}. Ignoring it."
+                    )
+                    continue
+            case _:
+                print(f"WARN: unknown state machine input. Ignoring it: {to_json(exec_input)}")
+                continue
 
         # skip the execution that invoked the currently running lambda
-        if instance_id == current_instance_id:
+        if (
+            (isinstance(event, Ec2Event) and event.ec2_instance_id == workload_id)
+            or
+            (isinstance(event, EcsEvent) and event.ecs_task_arn == workload_id)
+        ):
+            print(f"Current SFN execution: {execution["executionArn"]}")
             continue
 
-        # if the instance event of the execution is older than one we
+
+        # if the event input of the SFN execution is older than one we
         # are currently handling, then we should do the cleanup, so
-        # we don't add the vpc/az to the set
-        if event_time is not None and exec_time < event_time:
-            continue
-
-        instance = elastio_instances.get(instance_id)
-        if instance is None:
-            continue
-
-        instance_az = instance.get('Placement', {}).get('AvailabilityZone')
-
-        if instance_az is None:
+        # we don't add the vpc/az to the pending cleanups set
+        if not isinstance(event, ScheduleEvent) and event.time >= sfn_time:
             print(
-                f"WARN: Instance doesn't have an availability zone:"
-                f" {to_json(instance)}. Ignoring it..."
+                f"This lambda run ({event.time}) overtakes the older scheduled "
+                f"SFN execution for an event ({sfn_time}): {execution_arn}"
             )
             continue
 
-        subnets_in_instance_az = filter(
-            lambda subnet: subnet['AvailabilityZone'] == instance_az,
-            subnets.values()
-        )
-
-        for subnet in subnets_in_instance_az:
+        for subnet in subnets.values():
             vpc_id = subnet['VpcId']
-            az = subnet['AvailabilityZone']
-            pending_cleanups.add(vpc_id, az)
+            subnet_az = subnet['AvailabilityZone']
+
+            if subnet_az != workload_az:
+                continue
+
+            pending_cleanups.add(vpc_id, subnet_az)
+
+    print_json("pending_cleanups", pending_cleanups)
 
     return pending_cleanups
 
@@ -542,7 +778,6 @@ class NatDeployment:
     subnet_id: str
     az: str
 
-
 class PendingCleanups:
     def __init__(self):
         self.vpc_id_to_zones = {}
@@ -558,3 +793,61 @@ class PendingCleanups:
     def contains(self, vpc_id, availability_zone):
         zones = self.vpc_id_to_zones.get(vpc_id, set())
         return availability_zone in zones
+
+type Workload = Ec2Workload | EcsWorkload
+
+@dataclass
+class Ec2Workload:
+    vpc_id: Optional[str]
+    subnet_id: Optional[str]
+    az: str
+    ec2_instance_id: str
+    state: str
+
+    @staticmethod
+    def from_aws_api(ec2_instance: 'InstanceTypeDef') -> 'Ec2Workload':
+        return Ec2Workload(
+            vpc_id=ec2_instance.get('VpcId'),
+            subnet_id=ec2_instance.get('SubnetId'),
+            az=ec2_instance['Placement']['AvailabilityZone'],
+            ec2_instance_id=ec2_instance['InstanceId'],
+            state=ec2_instance['State']['Name'],
+        )
+
+    def is_active_in_vpc_az(self, vpc_id: str, az: str) -> bool:
+        active_states = ('pending', 'running', 'stopping', 'shutting-down')
+
+        return (
+            self.state in active_states and
+            self.az == az and
+            (
+                # VpcId and SubnetId are not always present in the EC2 instance.
+                # It isn't present in case if the EC2 instance is in shutting-down
+                # state, for example (seen during testing). Maybe there are some other cases
+                # where VpcId isn't present, so we gracefully consider such instances as
+                # potentially active in the given VPC.
+                self.vpc_id == None
+                or
+                self.vpc_id == vpc_id
+            )
+        )
+
+@dataclass
+class EcsWorkload:
+    vpc_id: str
+    subnet_id: str
+    az: str
+    ecs_task_arn: str
+    ecs_cluster_arn: str
+    status: str
+
+    def is_active_in_vpc_az(self, vpc_id: str, az: str) -> bool:
+        return (
+            self.status not in ('STOPPED', 'DELETED') and
+            self.vpc_id == vpc_id and
+            self.az == az
+        )
+
+def chunks[T](input: Iterable[T], chunk_size: int):
+    it = iter(input)
+    return iter(lambda: list(itertools.islice(it, chunk_size)), [])

@@ -79,6 +79,9 @@ Resources:
                   - ec2:DescribeSubnets
                   - ec2:DescribeVpcs
                   - ec2:ReleaseAddress
+                  - ecs:ListClusters
+                  - ecs:ListTasks
+                  - ecs:DescribeTasks
                   - states:DescribeExecution
                   - states:ListExecutions
                 Resource: '*'
@@ -159,13 +162,15 @@ Resources:
         S3Bucket: !Sub '{{S3_BUCKET_PREFIX}}-${AWS::Region}'
         S3Key: {{S3_KEY_PREFIX}}/{{VERSION}}/lambda.zip
 
-  pendingInstancesSubscription:
+  pendingEc2InstancesSubscription:
     Type: AWS::Events::Rule
     Properties:
       Description: Track pending EC2 instances for Elastio NAT Gateway provisioner lambda
       EventPattern:
-        source: [ aws.ec2 ]
-        detail-type: [ EC2 Instance State-change Notification ]
+        account: [!Ref AWS::AccountId]
+        region: [!Ref AWS::Region]
+        source: [aws.ec2]
+        detail-type: [EC2 Instance State-change Notification]
         detail:
           state:
             - pending
@@ -173,25 +178,80 @@ Resources:
         - Arn: !GetAtt lambdaFunction.Arn
           Id: event-handler
 
-  pendingInstancesLambdaInvokePermission:
+  pendingEc2InstancesLambdaInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref lambdaFunction
       Principal: events.amazonaws.com
-      SourceArn: !GetAtt pendingInstancesSubscription.Arn
+      SourceArn: !GetAtt pendingEc2InstancesSubscription.Arn
 
-  stoppedInstancesSubscription:
+  stoppedEc2InstancesSubscription:
     Type: AWS::Events::Rule
     Properties:
       Description: Track stopped and terminated EC2 instances for Elastio NAT Gateway provisioner lambda
       EventPattern:
-        source: [ aws.ec2 ]
-        detail-type: [ EC2 Instance State-change Notification ]
+        account: [!Ref AWS::AccountId]
+        region: [!Ref AWS::Region]
+        source: [aws.ec2]
+        detail-type: [EC2 Instance State-change Notification]
         detail:
           state:
             - stopped
             - terminated
+      Targets:
+        - Arn: !GetAtt natGatewayCleanupStateMachine.Arn
+          Id: event-handler
+          RoleArn: !GetAtt stateMachineExecutionRole.Arn
+
+  provisioningEcsTasksSubscription:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Track provisioning Fargate ECS tasks for Elastio NAT Gateway provisioner lambda
+      EventPattern:
+        account: [!Ref AWS::AccountId]
+        region: [!Ref AWS::Region]
+        source: [aws.ecs]
+        detail-type: [ECS Task State Change]
+        detail:
+          lastStatus: [PROVISIONING]
+          # We are interested only in `FARGATE`, because `EC2` is covered by the EC2 instance events.
+          launchType: [FARGATE]
+          containers:
+            image:
+              # Any container image from any elastio ECR registry will trigger the lambda.
+              # This pattern includes `elastio-development` registry as well for testing.
+              - prefix: public.ecr.aws/elastio
+      Targets:
+        - Arn: !GetAtt lambdaFunction.Arn
+          Id: event-handler
+
+  provisioningEcsTasksLambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref lambdaFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt provisioningEcsTasksSubscription.Arn
+
+  stoppedEcsTasksSubscription:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Track stopped Fargate ECS tasks for Elastio NAT Gateway provisioner lambda
+      EventPattern:
+        account: [!Ref AWS::AccountId]
+        region: [!Ref AWS::Region]
+        source: [aws.ecs]
+        detail-type: [ECS Task State Change]
+        detail:
+          lastStatus: [STOPPED]
+          # We are interested only in `FARGATE`, because `EC2` is covered by the EC2 instance events.
+          launchType: [FARGATE]
+          containers:
+            image:
+              # Any container image from any elastio ECR registry will trigger the lambda.
+              # This pattern includes `elastio-development` registry as well for testing.
+              - prefix: public.ecr.aws/elastio
       Targets:
         - Arn: !GetAtt natGatewayCleanupStateMachine.Arn
           Id: event-handler
@@ -230,13 +290,3 @@ Resources:
 Outputs:
   templateVersion:
     Value: {{VERSION}}
-  lambdaFunctionArn:
-    Value: !GetAtt lambdaFunction.Arn
-  pendingInstancesSubscriptionArn:
-    Value: !GetAtt pendingInstancesSubscription.Arn
-  stoppedInstancesSubscriptionArn:
-    Value: !GetAtt stoppedInstancesSubscription.Arn
-  natGatewayCleanupStateMachineArn:
-    Value: !GetAtt natGatewayCleanupStateMachine.Arn
-  cleanupScheduleArn:
-    Value: !GetAtt cleanupSchedule.Arn

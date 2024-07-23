@@ -207,7 +207,7 @@ Resources:
   provisioningEcsTasksSubscription:
     Type: AWS::Events::Rule
     Properties:
-      Description: Track provisioning ECS tasks for Elastio NAT Gateway provisioner lambda
+      Description: Track provisioning Fargate ECS tasks for Elastio NAT Gateway provisioner lambda
       EventPattern:
         account: [!Ref AWS::AccountId]
         region: [!Ref AWS::Region]
@@ -237,7 +237,7 @@ Resources:
   stoppedEcsTasksSubscription:
     Type: AWS::Events::Rule
     Properties:
-      Description: Track stopped ECS tasks for Elastio NAT Gateway provisioner lambda
+      Description: Track stopped Fargate ECS tasks for Elastio NAT Gateway provisioner lambda
       EventPattern:
         account: [!Ref AWS::AccountId]
         region: [!Ref AWS::Region]

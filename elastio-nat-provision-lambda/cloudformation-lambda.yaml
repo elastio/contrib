@@ -215,6 +215,8 @@ Resources:
         detail-type: [ECS Task State Change]
         detail:
           lastStatus: [PROVISIONING]
+          # We are interested only in `FARGATE`, because `EC2` is covered by the EC2 instance events.
+          launchType: [FARGATE]
           containers:
             image:
               # Any container image from any elastio ECR registry will trigger the lambda.
@@ -243,6 +245,8 @@ Resources:
         detail-type: [ECS Task State Change]
         detail:
           lastStatus: [STOPPED]
+          # We are interested only in `FARGATE`, because `EC2` is covered by the EC2 instance events.
+          launchType: [FARGATE]
           containers:
             image:
               # Any container image from any elastio ECR registry will trigger the lambda.

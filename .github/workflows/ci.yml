@@ -112,4 +112,4 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: ${{ vars.aws_elastio_prod_artifacts_contrib_role_arn }}
 
-      - run: ./elastio-nat-provision-lambda/upload.sh
+      - run: cd elastio-nat-provision-lambda && ./upload.sh

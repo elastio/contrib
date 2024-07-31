@@ -415,7 +415,7 @@ def deploy_nat_stack(stack_name, subnet_id, route_table_id):
 
 def choose_subnet_for_nat(
     nat_deployments: list['NatDeployment'],
-    subnets: dict,
+    subnets: dict[str, 'SubnetTypeDef'],
     public_subnets_ids: set[str],
     workload: 'Workload',
 ):

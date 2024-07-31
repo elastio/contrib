@@ -65,10 +65,17 @@ Resources:
     Properties:
       LogGroupName: /aws/lambda/elastio-nat-gateway-provision
       RetentionInDays: !Ref LambdaLogsRetention
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
 
   lambdaRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -122,6 +129,10 @@ Resources:
   lambdaInvocationRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -144,6 +155,10 @@ Resources:
   stateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -164,6 +179,10 @@ Resources:
   lambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
       FunctionName: elastio-nat-gateway-provision
       Handler: lambda.lambda_handler
       Runtime: python3.12
@@ -278,6 +297,9 @@ Resources:
   natGatewayCleanupStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
       StateMachineName: elastio-nat-gateway-provision-state-machine
       RoleArn: !GetAtt lambdaInvocationRole.Arn
       Definition:

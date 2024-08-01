@@ -22,6 +22,7 @@ NAT_CFN_PREFIX = os.environ['NAT_CFN_PREFIX']
 NAT_CFN_TEMPLATE_URL = os.environ['NAT_CFN_TEMPLATE_URL']
 STATE_MACHINE_ARN = os.environ['STATE_MACHINE_ARN']
 LAMBDA_NAME = os.environ['AWS_LAMBDA_FUNCTION_NAME']
+NAT_GATEWAY_SCOPE = os.environ.get('NAT_GATEWAY_SCOPE', 'vpc')
 
 # It's not possible to serialize dataclasses with the default JSON encoder.
 # The reason Python restricts this is apparently to avoid confusion that
@@ -223,12 +224,9 @@ def ensure_nat(event: WorkloadEvent):
 
     if workload.vpc_id is None:
         raise Exception(f"VPC ID is not known for the workload: {to_json(workload)}")
-        return
 
     if workload.subnet_id is None:
         raise Exception(f"Subnet ID is not known for the workload: {to_json(workload)}")
-        return
-
 
     subnets = {sn['SubnetId']: sn for sn in request(
         ec2,
@@ -311,7 +309,10 @@ def ensure_nat(event: WorkloadEvent):
     )
 
     if nat_subnet_id is None:
-        print("Unable to find a public subnet for NAT in the same availability zone; exiting")
+        print(
+            "Unable to find a public subnet for NAT in "
+            f"the {NAT_GATEWAY_SCOPE} scope; exiting"
+        )
         return
 
     print(f"Chose the following public subnet for NAT: {nat_subnet_id}")
@@ -414,23 +415,36 @@ def deploy_nat_stack(stack_name, subnet_id, route_table_id):
 
 def choose_subnet_for_nat(
     nat_deployments: list['NatDeployment'],
-    subnets: dict,
+    subnets: dict[str, 'SubnetTypeDef'],
     public_subnets_ids: set[str],
     workload: 'Workload',
 ):
     for nat_deployment in nat_deployments:
-        if nat_deployment.vpc_id == workload.vpc_id and nat_deployment.az == workload.az:
+        if (
+            nat_deployment.vpc_id == workload.vpc_id and
+            (
+                NAT_GATEWAY_SCOPE == 'vpc' or
+                nat_deployment.az == workload.az
+            )
+        ):
             print(f"Found already existing NAT deployment: {to_json(nat_deployment)}")
             return nat_deployment.subnet_id
 
-    print(f"No existing deployments found for {workload.vpc_id}/{workload.az}")
+    scope = render_scope(workload.vpc_id, workload.az)
 
-    for subnet_id in sorted(list(public_subnets_ids)):
-        if subnets[subnet_id]['AvailabilityZone'] != workload.az:
-            continue
-        return subnet_id
-    return None
+    print(f"No existing deployments found for {scope}")
 
+    return next(
+        (
+            subnet_id
+            for subnet_id in sorted(list(public_subnets_ids))
+            if (
+                NAT_GATEWAY_SCOPE == 'vpc' or
+                subnets[subnet_id]['AvailabilityZone'] == workload.az
+            )
+        ),
+        None
+    )
 
 def get_public_subnets(subnet_to_route_table, route_tables):
     for subnet_id, rt_id in subnet_to_route_table.items():
@@ -586,31 +600,33 @@ def cleanup_nat(event: AnyEvent):
         nat_vpc_id = nat_deployment.vpc_id
         nat_az = nat_deployment.az
 
+        scope = render_scope(nat_vpc_id, nat_az)
+
         if pending_cleanups.contains(nat_vpc_id, nat_az):
-            print(f"There is a more recent cleanup pending for {nat_vpc_id}/{nat_az}; skipping.")
+            print(f"There is a more recent cleanup pending for {scope}; skipping.")
             continue
 
         active_workloads = (
             workload for workload in workloads.values()
-            if workload.is_active_in_vpc_az(nat_vpc_id, nat_az)
+            if workload.is_active_in_scope(nat_vpc_id, nat_az)
         )
 
         active_workload = next(active_workloads, None)
 
         if active_workload is not None:
             print(
-                f"Found potentially active elastio workload in {nat_vpc_id}/{nat_az};"
+                f"Found potentially active elastio workload in {scope};"
                 f" skipping NAT gateway stack deletion."
                 f" Workload: {to_json(active_workload)}"
             )
             continue
 
-        print(f"No active elastio workloads found in {nat_vpc_id}/{nat_az}")
+        print(f"No active elastio workloads found in {scope}")
 
         stack_name = f"{NAT_CFN_PREFIX}{nat_deployment.subnet_id}"
 
         if is_stack_needs_to_be_deleted(stack_name):
-            print(f"Initiating deletion of NAT gateway stack '{stack_name}' for {nat_vpc_id}/{nat_az}.")
+            print(f"Initiating deletion of NAT gateway stack '{stack_name}' for {scope}.")
             delete_nat_gateway_stack(stack_name)
 
 
@@ -662,7 +678,7 @@ def get_pending_cleanups(
                 workload = workloads.get(instance_id)
                 if workload is not None:
                     workload_az = workload.az
-                else:
+                elif NAT_GATEWAY_SCOPE == 'az':
                     print(
                         f"Can't determine the AZ of the EC2 instance from the event "
                         f"in SFN, because EC2 instance info is no longer returned from "
@@ -685,7 +701,7 @@ def get_pending_cleanups(
 
         # if the event input of the SFN execution is older than one we
         # are currently handling, then we should do the cleanup, so
-        # we don't add the vpc/az to the pending cleanups set
+        # we don't add the scope to the pending cleanups set
         if not isinstance(event, ScheduleEvent) and event.time >= sfn_time:
             print(
                 f"This lambda run ({event.time}) overtakes the older scheduled "
@@ -697,10 +713,16 @@ def get_pending_cleanups(
             vpc_id = subnet['VpcId']
             subnet_az = subnet['AvailabilityZone']
 
-            if subnet_az != workload_az:
+            if NAT_GATEWAY_SCOPE == 'az' and subnet_az != workload_az:
                 continue
 
             pending_cleanups.add(vpc_id, subnet_az)
+
+        if NAT_GATEWAY_SCOPE == 'vpc':
+            # The workload could be in any subnet in any vpc.
+            # We added all vpc/az pairs to pending cleanups already
+            # on the first iteration, so we can exit early
+            break
 
     print_json("pending_cleanups", pending_cleanups)
 
@@ -770,6 +792,13 @@ def get_nat_deployments(subnets):
         )
         yield NatDeployment(nat_gateway_id, stack_id, vpc_id, subnet_id, az)
 
+def render_scope(vpc, az):
+    return (
+        vpc
+        if NAT_GATEWAY_SCOPE == 'vpc'
+        else f'{vpc}/{az}'
+    )
+
 @dataclass
 class NatDeployment:
     nat_gateway_id: str
@@ -785,14 +814,14 @@ class PendingCleanups:
     def __str__(self):
         return str(self.vpc_id_to_zones)
 
-    def add(self, vpc_id, availability_zone):
-        zones = self.vpc_id_to_zones.pop(vpc_id, set())
-        zones.add(availability_zone)
-        self.vpc_id_to_zones[vpc_id] = zones
+    def add(self, vpc_id: str, az: str):
+        azs = self.vpc_id_to_zones.pop(vpc_id, set())
+        azs.add(az)
+        self.vpc_id_to_zones[vpc_id] = azs
 
-    def contains(self, vpc_id, availability_zone):
-        zones = self.vpc_id_to_zones.get(vpc_id, set())
-        return availability_zone in zones
+    def contains(self, vpc_id: str, az: str):
+        azs = self.vpc_id_to_zones.get(vpc_id)
+        return (not (azs is None)) and (NAT_GATEWAY_SCOPE == 'vpc' or az in azs)
 
 type Workload = Ec2Workload | EcsWorkload
 
@@ -814,13 +843,12 @@ class Ec2Workload:
             state=ec2_instance['State']['Name'],
         )
 
-    def is_active_in_vpc_az(self, vpc_id: str, az: str) -> bool:
+    def is_active_in_scope(self, vpc_id: str, az: str) -> bool:
         active_states = ('pending', 'running', 'stopping', 'shutting-down')
 
         return (
             self.state in active_states and
-            self.az == az and
-            (
+            (NAT_GATEWAY_SCOPE == 'vpc' or self.az == az) and (
                 # VpcId and SubnetId are not always present in the EC2 instance.
                 # It isn't present in case if the EC2 instance is in shutting-down
                 # state, for example (seen during testing). Maybe there are some other cases
@@ -841,11 +869,11 @@ class EcsWorkload:
     ecs_cluster_arn: str
     status: str
 
-    def is_active_in_vpc_az(self, vpc_id: str, az: str) -> bool:
+    def is_active_in_scope(self, vpc_id: str, az: str) -> bool:
         return (
             self.status not in ('STOPPED', 'DELETED') and
             self.vpc_id == vpc_id and
-            self.az == az
+            (NAT_GATEWAY_SCOPE == 'vpc' or self.az == az)
         )
 
 def chunks[T](input: Iterable[T], chunk_size: int):

@@ -9,6 +9,7 @@ Parameters:
     Default: 300
     MinValue: 0
     Description: How long to wait for no new EC2 instances to appear before deleting the NAT Gateway
+
   CleanupScheduleCron:
     Type: String
     Default: '0 1 * * ? *'
@@ -16,23 +17,39 @@ Parameters:
       A cron expression that defines when and how often to run a cleanup routine.
       The syntax corresponds to the AWS Scheduler's cron expression syntax:
       https://docs.aws.amazon.com/scheduler/latest/UserGuide/schedule-types.html#cron-based
+
+  NatGatewayScope:
+    Type: String
+    Default: 'vpc'
+    AllowedValues: ['vpc', 'az']
+    Description: >
+      The scope of the NAT Gateway deployment. The default value of 'vpc' means
+      only one NAT gateway will be deployed per VPC. This results in cross-AZ
+      traffic, but keeps the number of NAT gateways to a minimum.
+
+      If set to 'az', only one NAT Gateway will be deployed per VPC/AZ. This
+      results in intra-AZ traffic, but increases the number of NAT gateways.
+
   NatGatewayStackPrefix:
     Type: String
     Default: elastio-nat-gateway-
     MinLength: 1
     Description: Prefix of the name of the NAT Gateway CFN stack. The name will be <prefix><public-subnet-id>
+
   LambdaMemorySize:
     Type: Number
     Default: 512
     MinValue: 128
     MaxValue: 10240
     Description: Amount of memory allocated to the lambda function
+
   LambdaTimeout:
     Type: Number
     Default: 600
     MinValue: 10
     MaxValue: 900
     Description: Max amount of time the lambda function can run
+
   LambdaLogsRetention:
     Type: String
     Default: '7'
@@ -48,10 +65,17 @@ Resources:
     Properties:
       LogGroupName: /aws/lambda/elastio-nat-gateway-provision
       RetentionInDays: !Ref LambdaLogsRetention
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
 
   lambdaRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -105,6 +129,10 @@ Resources:
   lambdaInvocationRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -127,6 +155,10 @@ Resources:
   stateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -147,6 +179,10 @@ Resources:
   lambdaFunction:
     Type: AWS::Lambda::Function
     Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
       FunctionName: elastio-nat-gateway-provision
       Handler: lambda.lambda_handler
       Runtime: python3.12
@@ -155,6 +191,7 @@ Resources:
       Role: !GetAtt lambdaRole.Arn
       Environment:
         Variables:
+          NAT_GATEWAY_SCOPE: !Ref NatGatewayScope
           NAT_CFN_PREFIX: !Ref NatGatewayStackPrefix
           NAT_CFN_TEMPLATE_URL: !Sub https://{{S3_BUCKET_PREFIX}}-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/{{S3_KEY_PREFIX}}/{{VERSION}}/cloudformation-nat.yaml
           STATE_MACHINE_ARN: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:elastio-nat-gateway-provision-state-machine'
@@ -260,6 +297,9 @@ Resources:
   natGatewayCleanupStateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
       StateMachineName: elastio-nat-gateway-provision-state-machine
       RoleArn: !GetAtt lambdaInvocationRole.Arn
       Definition:

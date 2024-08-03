@@ -91,6 +91,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - cloudformation:DescribeStacks
+                  - cloudformation:CreateChangeSet
                   - ec2:AllocateAddress
                   - ec2:CreateNatGateway
                   - ec2:CreateRoute
@@ -112,6 +113,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
                   - cloudformation:DeleteStack
                   - ec2:DeleteNatGateway
                 Resource: '*'

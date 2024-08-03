@@ -1,16 +1,26 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/goformation/master/schema/cloudformation.schema.json
 AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::LanguageExtensions
+
 Description: Deploys a single NAT Gateway
 
 Parameters:
   PublicSubnetId:
     Type: String
     Description: ID of a public subnet where the NAT Gateway will be deployed
-  PrivateSubnetRouteTableId:
+
+  # We need to have a list input here because many private subnets may have
+  # different route tables they are associated with. This means we need to
+  # create routes in many route tables. The lambda automatically inspects the
+  # value of this parameter and adds a new route table ID if it isn't already
+  # present in the list.
+  PrivateSubnetRouteTableIds:
     Type: String
     Description: >
-      ID of a route table associated with the private subnet that will be modified to forward internet
-      traffic through NAT
+      IDs of a route tables associated with the private subnets that will be
+      modified to forward internet traffic through NAT. This parameter must
+      be a comma separated list of route table IDs.
+    MinLength: '1'
 
 Resources:
   eip:
@@ -34,12 +44,16 @@ Resources:
         - Key: elastio:nat-provision-stack-id
           Value: !Ref AWS::StackId
 
-  route:
-    Type: AWS::EC2::Route
-    Properties:
-      RouteTableId: !Ref PrivateSubnetRouteTableId
-      DestinationCidrBlock: '0.0.0.0/0'
-      NatGatewayId: !Ref nat
+  Fn::ForEach::privateSubnetsNatGatewayRoutes:
+    - routeTableId
+    - !Split [',', !Ref PrivateSubnetRouteTableIds]
+    - 'route&{routeTableId}':
+        Type: AWS::EC2::Route
+        Properties:
+          RouteTableId: !Ref routeTableId
+          DestinationCidrBlock: '0.0.0.0/0'
+          NatGatewayId: !Ref nat
+
 
 Outputs:
   templateVersion:

@@ -5,6 +5,7 @@ from typing import Iterable, Optional, TYPE_CHECKING, TypedDict
 if TYPE_CHECKING:
     from mypy_boto3_ec2.type_defs import SubnetTypeDef, InstanceTypeDef
     from mypy_boto3_ecs.type_defs import TaskTypeDef
+    from mypy_boto3_cloudformation.type_defs import StackTypeDef
 
 import json
 import os
@@ -319,11 +320,8 @@ def ensure_nat(event: WorkloadEvent):
 
     stack_name = f"{NAT_CFN_PREFIX}{nat_subnet_id}"
 
-    if not is_stack_deployed(stack_name):
-        print(f"No existing stack '{stack_name}' found, deploying new stack")
-        deploy_nat_stack(stack_name, nat_subnet_id, workload_route_table_id)
-    else:
-        print(f"Stack {stack_name} already exists or is in progress; nothing more to do.")
+    deploy_nat_stack(stack_name, nat_subnet_id, workload_route_table_id)
+
 
 def is_nat_managed_by_us(nat_deployments: list['NatDeployment'], suspect_nat_gateway_id: str) -> bool:
     nat_deployment = next(
@@ -342,18 +340,15 @@ def is_nat_managed_by_us(nat_deployments: list['NatDeployment'], suspect_nat_gat
 
     return True
 
-def get_stack_status(stack_name):
+def describe_stack(stack_name: str) -> Optional['StackTypeDef']:
     try:
-        stacks = request(
-            cfn,
-            'describe_stacks',
-            'Stacks',
-            StackName=stack_name,
+        response = cfn.describe_stacks(
+            StackName=stack_name
         )
 
-        print_json("existing_nat_cfn_stack", stacks[0])
+        print_json("describe_stack_response", response)
 
-        return stacks[0]['StackStatus']
+        return response['Stacks'][0]
     except cfn.exceptions.ClientError as e:
         if 'does not exist' in str(e):
             print(f"Stack with a name {stack_name} does not exist.")
@@ -363,55 +358,151 @@ def get_stack_status(stack_name):
         return None
 
 
-def is_stack_deployed(stack_name):
-    stack_status = get_stack_status(stack_name)
+def wait_for_stack_to_settle(stack_name: str):
+    while True:
+        stack = describe_stack(stack_name)
+        if stack is None:
+            return None
 
-    if stack_status == 'DELETE_IN_PROGRESS':
-        print(f"The stack {stack_name} is being deleted, waiting until the deletion completes.")
-        while True:
-            time.sleep(5)
-            stack_status = get_stack_status(stack_name)
-            if stack_status != 'DELETE_IN_PROGRESS':
-                break
+        stack_status = stack['StackStatus']
 
-    if stack_status is None:
-        return False
+        if stack_status.endswith('_IN_PROGRESS'):
+            sleep_seconds = 5
+            print(
+                f"Stack has status {stack_status}. Stack: {stack_name}. "
+                f"Waiting for it to settle. Retrying in {sleep_seconds} seconds..."
+            )
+            time.sleep(sleep_seconds)
+            continue
 
-    print(f"Stack {stack_name} is deployed and has status {stack_status}.")
-    return True
+        print(f"Stack {stack_name} has a settled status {stack_status}")
+        return stack
 
 
-def deploy_nat_stack(stack_name, subnet_id, route_table_id):
-    try:
-        response = cfn.create_stack(
-            StackName=stack_name,
-            TemplateURL=NAT_CFN_TEMPLATE_URL,
-            OnFailure='DELETE',
-            Parameters=[
-                {
-                    'ParameterKey': 'PublicSubnetId',
-                    'ParameterValue': subnet_id,
-                },
-                {
-                    'ParameterKey': 'PrivateSubnetRouteTableId',
-                    'ParameterValue': route_table_id,
-                },
-            ],
-            Tags=[
-                {
-                    'Key': 'elastio:resource',
-                    'Value': 'true',
-                },
-                {
-                    'Key': 'elastio:created-by',
-                    'Value': f'lambda:{LAMBDA_NAME}',
-                }
-            ]
-        )
-        print(f"Stack creation initiated for {stack_name}: {to_json(response)}")
-    except cfn.exceptions.AlreadyExistsException:
-        print(f"Stack {stack_name} already exists")
+def deploy_nat_stack(stack_name: str, public_subnet_id: str, private_rtb_id: str):
+    total_attempts = 5
+    for i in range(total_attempts):
+        try:
+            print(f"Attempt #{i + 1}/{total_attempts} to create stack {stack_name}")
 
+            stack = wait_for_stack_to_settle(stack_name)
+
+            if stack is None:
+                try:
+                    create_stack(stack_name, public_subnet_id, private_rtb_id)
+                    return
+                except cfn.exceptions.AlreadyExistsException:
+                    print(f"CreateStack reported that stack {stack_name} already exists")
+                    continue
+
+            stack_status = stack['StackStatus']
+            route_table_ids_param = next(
+                (
+                    param['ParameterValue']
+                    for param in stack.get('Parameters', [])
+                    if param['ParameterKey'] == 'PrivateSubnetRouteTableIds'
+                ),
+                ''
+            )
+
+            existing_private_rtb_ids = route_table_ids_param.split(',')
+            has_desired_route_table_id = private_rtb_id in existing_private_rtb_ids
+
+            if stack_status in ('CREATE_COMPLETE', 'UPDATE_COMPLETE'):
+                if has_desired_route_table_id:
+                    print(
+                        f"Stack {stack_name} already exists and has the desired "
+                        f"route table ID {private_rtb_id}. Exiting."
+                    )
+                    return
+                else:
+                    print(
+                        f"Updating the stack {stack_name}. Adding new route table ID "
+                        f"{private_rtb_id}. It has: '{route_table_ids_param}'."
+                    )
+            else:
+                print(
+                    f"Updating the stack  {stack_name} because it has status {stack_status}. "
+                    f"Route table IDs: {route_table_ids_param}."
+                )
+
+            private_rtb_ids = sorted(set(existing_private_rtb_ids + [private_rtb_id]))
+
+            update_stack(stack_name, public_subnet_id, private_rtb_ids)
+            print("Stack update requested successfully. Exiting.")
+
+            return
+        except Exception as e:
+            print(f"Failed to deploy NAT stack: {repr(e)}")
+
+def update_stack(
+    stack_name: str,
+    public_subnet_id: str,
+    private_rtb_ids: list[str],
+):
+    new_private_rtb_ids = ",".join(private_rtb_ids)
+    print(
+        f"Updating the stack '{stack_name}' with the new private route table IDs: ",
+        f"'{new_private_rtb_ids}'"
+    )
+
+    response = cfn.update_stack(
+        StackName=stack_name,
+        TemplateURL=NAT_CFN_TEMPLATE_URL,
+
+        # It's important to set this to False so that macros are re-evaluated
+        # during an update. For details, see the remarks here:
+        # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/transform-aws-languageextensions.html#transform-aws-languageextensions-remarks
+        UsePreviousTemplate=False,
+
+        Parameters=[
+            {
+                'ParameterKey': 'PublicSubnetId',
+                'ParameterValue': public_subnet_id,
+            },
+            {
+                'ParameterKey': 'PrivateSubnetRouteTableIds',
+                'ParameterValue': new_private_rtb_ids,
+            },
+        ],
+        Capabilities=['CAPABILITY_AUTO_EXPAND']
+    )
+
+    print_json("update_stack_response", response)
+
+def create_stack(stack_name: str, public_subnet_id: str, private_rtb_id: str):
+    parameters = [
+        {
+            'ParameterKey': 'PublicSubnetId',
+            'ParameterValue': public_subnet_id,
+        },
+        {
+            'ParameterKey': 'PrivateSubnetRouteTableIds',
+            'ParameterValue': private_rtb_id,
+        },
+    ]
+
+    print(f"Creating stack {stack_name}. Parameters: {to_json(parameters)}")
+
+    response = cfn.create_stack(
+        StackName=stack_name,
+        TemplateURL=NAT_CFN_TEMPLATE_URL,
+        OnFailure='DELETE',
+        Parameters=parameters,
+        Tags=[
+            {
+                'Key': 'elastio:resource',
+                'Value': 'true',
+            },
+            {
+                'Key': 'elastio:created-by',
+                'Value': f'lambda:{LAMBDA_NAME}',
+            }
+        ],
+        Capabilities=['CAPABILITY_AUTO_EXPAND']
+    )
+
+    print_json("create_stack_response", response)
 
 def choose_subnet_for_nat(
     nat_deployments: list['NatDeployment'],
@@ -625,9 +716,25 @@ def cleanup_nat(event: AnyEvent):
 
         stack_name = f"{NAT_CFN_PREFIX}{nat_deployment.subnet_id}"
 
-        if is_stack_needs_to_be_deleted(stack_name):
-            print(f"Initiating deletion of NAT gateway stack '{stack_name}' for {scope}.")
-            delete_nat_gateway_stack(stack_name)
+        # XXX: there may be multiple private subnets using the same NAT gateway
+        # Every private subnet may have association with its own route table,
+        # so there may be multiple route tables associated with the NAT gateway.
+        #
+        # If one of the private subnets no longer has active instances, but another
+        # still has some, we could update the stack by deleting the route table
+        # association for the subnet that no longer has active instances, but we
+        # don't do that for several reasons.
+        #
+        # 1. It doesn't harm if we keep the route table association for the private
+        #    subnet that no longer needs internet access. On the contrary, it may
+        #    be useful if the subnet is later used for some other workload.
+        # 2. This keeps thing simpler and less error-prone. We can be sure that
+        #    route table IDs are only additive, and we don't need to worry about
+        #    several processes concurrently trying to delete/add route table IDs.
+        # 3. Either way once the last private subnet that needs the NAT gateway
+        #    no longer has active instances, the NAT gateway stack will be deleted
+        #    entirely together will all the route table associations that were in it.
+        delete_nat_gateway_stack(stack_name)
 
 
 def get_pending_cleanups(
@@ -729,38 +836,41 @@ def get_pending_cleanups(
     return pending_cleanups
 
 
-def is_stack_needs_to_be_deleted(stack_name):
-    stack_status = get_stack_status(stack_name)
+def delete_nat_gateway_stack(stack_name: str):
+    total_attempts = 10
+    for i in range(total_attempts):
+        try:
+            print(f"Attempt #{i + 1}/{total_attempts} to delete stack {stack_name}")
 
-    if stack_status == 'CREATE_IN_PROGRESS':
-        print(f"The stack {stack_name} is being created, waiting until the creation completes.")
-        while True:
-            time.sleep(5)
-            stack_status = get_stack_status(stack_name)
-            if stack_status != 'CREATE_IN_PROGRESS':
-                break
+            stack = describe_stack(stack_name)
+            if stack is None:
+                print(f"Stack {stack_name} does not exist. Nothing to do. Exiting")
+                return
 
-    if stack_status is None:
-        return False
+            stack_status = stack['StackStatus']
+            if stack_status in ('DELETE_IN_PROGRESS', 'DELETE_COMPLETE'):
+                print(f"Stack {stack_name} is already in status {stack_status}. Exiting")
+                return
 
-    if stack_status == 'DELETE_IN_PROGRESS':
-        print(f"Stack {stack_name} is in the process of being deleted.")
-        return False
+            response = cfn.delete_stack(StackName=stack_name)
 
-    print(f"Stack {stack_name} exists and has status {stack_status}.")
-    return True
+            print(f"DeleteStack requested for {stack_name}: {to_json(response)}")
+            return
+        except cfn.exceptions.ClientError as e:
+            # We get access denied when attempting to delete a non-existent stack
+            # because we have permissions to delete stacks only with the tag
+            # `elastio:resource`. Non-existent stacks don't have this tag, thus
+            # we get AccessDenied
+            if 'AccessDenied' in str(e):
+                print(f"Stack {stack_name} does not exist anymore. Exiting")
+                return
 
-
-def delete_nat_gateway_stack(stack_name):
-    try:
-        response = cfn.delete_stack(StackName=stack_name)
-        print(f"Stack deletion initiated for {stack_name}: {to_json(response)}")
-    except cfn.exceptions.ClientError as e:
-        if 'does not exist' in str(e):
-            print(f"Stack {stack_name} does not exist anymore")
-        else:
-            print(f"Failed to delete stack {stack_name}: {repr(e)}")
-
+            sleep_seconds = 5
+            print(
+                f"Failed to delete stack {stack_name}"
+                f"Waiting for it to settle. Retrying in {sleep_seconds} seconds..."
+            )
+            time.sleep(sleep_seconds)
 
 def get_nat_deployments(subnets):
     nat_gateways = request(

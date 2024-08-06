@@ -2,7 +2,8 @@
 set -o errexit
 set -o nounset
 
-paragraph=$(cat <<'EOP'
+paragraph=$(
+  cat <<'EOP'
 This script automates the process of evaluating the subnets within a VPC to
 test if they have the necessary access to be used with Elastio.
 
@@ -38,7 +39,7 @@ else
   region=$(aws configure get region 2>/dev/null)
   # If aws configure does not return a region, exit with an error
   if [ -z "$region" ]; then
-    echo "AWS region is not set; set the AWS_REGION or AWS_DEFAULT_REGION env var or configure one with `aws configure`" >&2
+    echo "AWS region is not set; set the AWS_REGION or AWS_DEFAULT_REGION env var or configure one with $(aws configure)" >&2
     exit 1
   fi
 fi
@@ -46,24 +47,24 @@ fi
 extra_tags=
 
 # Searching for --instance-tags param
-while (( "$#" )); do
+while (("$#")); do
   case "$1" in
-    --instance-tags)
-      if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
-        extra_tags=$2
-        shift 2
-      else
-        echo "Error: Argument for $1 is missing" >&2
-        exit 1
-      fi
-      ;;
-    -*|--*=)
-      echo "Error: Unsupported flag $1" >&2
+  --instance-tags)
+    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+      extra_tags=$2
+      shift 2
+    else
+      echo "Error: Argument for $1 is missing" >&2
       exit 1
-      ;;
-    *)
-      shift
-      ;;
+    fi
+    ;;
+  -* | --*=)
+    echo "Error: Unsupported flag $1" >&2
+    exit 1
+    ;;
+  *)
+    shift
+    ;;
   esac
 done
 
@@ -73,16 +74,13 @@ echo "Discovering available VPCs in ${region}..."
 v=1
 declare -A vpcIDs
 echo
-while IFS=$'\t' read -r vpc_id is_default name_tag
-do
+while IFS=$'\t' read -r vpc_id is_default name_tag; do
   echo "$v: ${vpc_id} (Name: ${name_tag}, IsDefault: ${is_default})"
-  vpcIDs[$v-1]=$vpc_id
+  vpcIDs[$v - 1]=$vpc_id
   ((v++))
 done < <(aws ec2 describe-vpcs --query 'Vpcs[].[VpcId,IsDefault,Tags[?Key==`Name`].Value | [0]]' --output json | jq -r '.[] | @tsv')
 
-
-if [ $v -eq 1 ];
-then
+if [ $v -eq 1 ]; then
   echo $v
   echo "No VPCs found in ${region}."
   exit
@@ -91,28 +89,24 @@ fi
 echo
 read -p "Select VPC (Press Enter to select VPC 1, or Ctrl-D to abort): " vpc
 
-if [ -z "$vpc" ];
-then
-   vpc=1
+if [ -z "$vpc" ]; then
+  vpc=1
 fi
 
-if [ $vpc -gt ${#vpcIDs[@]} ]
-then
+if [ $vpc -gt ${#vpcIDs[@]} ]; then
   echo "$vpc isn't a valid VPC number."
   exit
 fi
 
-vpcID=${vpcIDs[$vpc-1]}
+vpcID=${vpcIDs[$vpc - 1]}
 
 echo
 echo "Analysing $vpcID:"
 subnets_ids=($(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$vpcID" --query "Subnets[*].SubnetId" --output text))
 
-for subnetID in "${subnets_ids[@]}"
-do
+for subnetID in "${subnets_ids[@]}"; do
   name_tag=$(aws ec2 describe-subnets --subnet-ids "$subnetID" --query "Subnets[].Tags[?Key=='Name'].Value" --output text)
-  if [ -z "$name_tag" ]
-  then
+  if [ -z "$name_tag" ]; then
     subnet_display_name="${subnetID}"
   else
     subnet_display_name="${subnetID} (${name_tag})"
@@ -124,12 +118,11 @@ do
   default_tags="{Key=Name,Value=elastio-vpc-reachability-test $subnetID}"
 
   # Combine default and extra tags to create a single set of tags for the temp EC2 instance
-  if [ -n "$extra_tags" ]
-  then
-      tags="ResourceType=instance,Tags=[$default_tags,${extra_tags}]"
-      echo "Using custom instance tags: ${tags}"
+  if [ -n "$extra_tags" ]; then
+    tags="ResourceType=instance,Tags=[$default_tags,${extra_tags}]"
+    echo "Using custom instance tags: ${tags}"
   else
-      tags="ResourceType=instance,Tags=[$default_tags]"
+    tags="ResourceType=instance,Tags=[$default_tags]"
   fi
 
   IPv4=$(aws ec2 describe-subnets --subnet-ids $subnetID --query "Subnets[].MapPublicIpOnLaunch" --output text)
@@ -141,8 +134,7 @@ do
     --output text \
     --tag-specifications "${tags}")
 
-  while [[ $(aws ec2 describe-instances --instance-ids $instanceID --query "Reservations[].Instances[].State.Name" --output text) != "running" ]]
-  do
+  while [[ $(aws ec2 describe-instances --instance-ids $instanceID --query "Reservations[].Instances[].State.Name" --output text) != "running" ]]; do
     echo "  Waiting for ${instanceID} to start..."
     sleep 5
   done
@@ -160,8 +152,7 @@ do
     --query "NetworkInsightsAnalysis.NetworkInsightsAnalysisId" \
     --output text)
 
-  while [[ $(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids $analysisID --query "NetworkInsightsAnalyses[].Status" --output text) != "succeeded" ]]
-  do
+  while [[ $(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids $analysisID --query "NetworkInsightsAnalyses[].Status" --output text) != "succeeded" ]]; do
     echo "  Waiting for reachability analysis ${analysisID} to complete..."
     sleep 5
   done
@@ -169,7 +160,7 @@ do
   analysisResult=$(aws ec2 describe-network-insights-analyses --network-insights-analysis-ids $analysisID --query "NetworkInsightsAnalyses[].NetworkPathFound" --output text)
 
   echo "Analysis $analysisID path $pathID result: $analysisResult"
-  echo "Result details: https://us-east-2.console.aws.amazon.com/networkinsights/home?region=us-east-2#NetworkPathAnalysis:analysisId=${analysisID}"
+  echo "Result details: https://${region}.console.aws.amazon.com/networkinsights/home?region=${region}#NetworkPathAnalysis:analysisId=${analysisID}"
 
   echo "  Terminating test instance ${instanceID}..."
   output=$(aws ec2 terminate-instances --instance-ids $instanceID)

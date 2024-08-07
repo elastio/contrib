@@ -17,7 +17,7 @@ data "http" "cloudformation_template" {
   lifecycle {
     postcondition {
       condition     = self.status_code >= 200 && self.status_code < 300
-      error_message = "Status code invalid"
+      error_message = "Failed to fetch CloudFormation template"
     }
   }
 }

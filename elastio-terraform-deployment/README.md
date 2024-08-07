@@ -22,9 +22,13 @@ There is a terraform module under the `module` directory. It deploys all the nec
 
 - AWS Cloudformation stack named `elastio-account-level-stack`, which is deployed once per AWS account and contains the required IAM resources
 - Elastio Cloud Connector stack deployed by Elastio Portal via a REST API call. It contains Lambda functions, DynamoDB databases, S3 buckets, AWS Batch compute environments and other non-IAM resources.
-- *Optional.* AWS Cloudformation stack named `elastio-nat-provision` which deploys NAT gateways in the private subnets where Elastio scan job workers run. This is necessary only if you deploy Elastio into private subnets that don't have outbound Internet access already. Alternatively you can deploy your own NAT gateway if you want to.
+- *Optional.* AWS Cloudformation stack named `elastio-nat-provision` which deploys NAT gateways in the private subnets where Elastio scan job workers run. This is necessary only if you deploy Elastio into private subnets that don't have outbound Internet access already. Alternatively, you can deploy your own NAT gateway if you want to.
 
-Add this terraform module to your terraform project add specify the necessary input variables. Here you'll need to pass the PAT token you [generated earlier](#obtain-a-personal-access-token-pat), specify your Elastio tenant name and the list of regions with VPC/subnet configurations where you want to deploy Elastio.
+Add this terraform module to your terraform project and specify the necessary input variables. Here you'll need to pass the PAT token you [generated earlier](#obtain-a-personal-access-token-pat), specify your Elastio tenant name and the list of regions with VPC/subnet configurations where you want to deploy Elastio.
+
+> [!IMPORTANT]
+> Make sure `curl` of version *at least* `7.76.0` is installed on the machine that runs the terraform deployment (`terraform apply`). The provided terraform module uses a `local-exec` provisioner that uses `curl` to do a REST API call to Elastio Portal.
+
 
 Here is an example usage of the module
 
@@ -33,7 +37,7 @@ provider "aws" {}
 provider "http" {}
 
 module "elastio" {
-  source = "../module"
+  source = "./module"
   elastio_pat = "{pat_token_from_elastio_portal}"
   elastio_tenant = "mycompany.app.elastio.com"
   elastio_cloud_connectors = [

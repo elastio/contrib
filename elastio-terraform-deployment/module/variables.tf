@@ -12,7 +12,7 @@ variable "elastio_tenant" {
 }
 
 variable "elastio_cloud_connectors" {
-  description = "List Cloud Connectors to deploy"
+  description = "List of regions where Cloud Connectors are to be deployed, and VPC and subnet(s) to use"
   type = list(object({
     region     = string
     vpc_id     = string

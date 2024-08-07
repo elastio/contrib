@@ -26,9 +26,9 @@ variable "elastio_nat_provision_stack" {
   description = <<DESCR
     Specifies the version of Elastio NAT provision stack to deploy (e.g. `v4`).
 
-    This is a Cloudformation stack that provisions automatically provisions
-    NAT Gateways in your VPC when Elastio worker instances run to provide them
-    with the outbound Internet access when Elastio is deployed in private subnets.
+    This is a Cloudformation stack that automatically provisions NAT Gateways in
+    your VPC when Elastio worker instances run to provide them with the outbound
+    Internet access when Elastio is deployed in private subnets.
 
     If you don't need this stack (e.g. you already have NAT gateways in your VPC
     or you deploy into public subnets) you can omit this parameter. The default

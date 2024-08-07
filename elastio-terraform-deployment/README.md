@@ -22,7 +22,7 @@ There is a terraform module under the `module` directory. It deploys all the nec
 
 - AWS Cloudformation stack named `elastio-account-level-stack`, which is deployed once per AWS account and contains the required IAM resources
 - Elastio Cloud Connector stack deployed by Elastio Portal via a REST API call. It contains Lambda functions, DynamoDB databases, S3 buckets, AWS Batch compute environments and other non-IAM resources.
-- *Optional.* AWS Cloudformation stack named `elastio-nat-provision` which deploys NAT gateways in the private subnets where Elastio scan job workers run. This is necessary only if you deploy Elastio into private subnets that don't have outbound Internet access already. Alternatively, you can deploy your own NAT gateway if you want to.
+- *Optional.* AWS Cloudformation stack named `elastio-nat-provision-lambda` which deploys NAT gateways in the private subnets where Elastio scan job workers run. This is necessary only if you deploy Elastio into private subnets that don't have outbound Internet access already. Alternatively, you can deploy your own NAT gateway if you want to.
 
 Add this terraform module to your terraform project and specify the necessary input variables. Here you'll need to pass the PAT token you [generated earlier](#obtain-a-personal-access-token-pat), specify your Elastio tenant name and the list of regions with VPC/subnet configurations where you want to deploy Elastio.
 

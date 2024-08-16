@@ -61,6 +61,8 @@ locals {
 }
 
 resource "terraform_data" "elastio_cloud_connector" {
+  depends_on = [aws_cloudformation_stack.elastio_account_level_stack]
+
   for_each = {
     for request in local.elastio_cloud_connector_deploy_requests :
     request.region => request

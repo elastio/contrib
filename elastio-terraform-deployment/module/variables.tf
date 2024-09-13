@@ -106,6 +106,9 @@ variable "iam_resource_names_prefix" {
     Add a custom prefix to names of all IAM resources deployed by this stack.
     The sum of the length of the prefix and suffix must not exceed 14 characters.
   DESCR
+
+  type    = string
+  default = null
 }
 
 variable "iam_resource_names_suffix" {
@@ -113,6 +116,9 @@ variable "iam_resource_names_suffix" {
     Add a custom prefix to names of all IAM resources deployed by this stack.
     The sum of the length of the prefix and suffix must not exceed 14 characters.
   DESCR
+
+  type    = string
+  default = null
 }
 
 variable "iam_resource_names_static" {
@@ -125,8 +131,22 @@ variable "iam_resource_names_static" {
     automation should have this set to `true` for easier management of IAM resources.
   DESCR
 
+  type     = bool
   default  = true
   nullable = false
+}
+
+variable "disable_customer_managed_iam_policies" {
+  description = <<DESCR
+    If this is set to `false` (or omitted), then the stack will create
+    additional customer-managed IAM policies that you can attach to your
+    IAM identities to grant them direct access to the Elastio Connector stack.
+    This way you can use elastio CLI directly to list Elastio scan jobs or
+    submit new scan jobs. Set this to `true` if you don't need these policies.
+  DESCR
+
+  type    = bool
+  default = null
 }
 
 variable "support_role_expiration_date" {

@@ -25,16 +25,18 @@ data "http" "cloudformation_template" {
 locals {
   global_acc_cfn_params = {
     encryptWithCmk = var.encrypt_with_cmk,
+    lambdaTracing  = var.lambda_tracing,
     globalManagedPolicies = (
       var.global_managed_policies == null
       ? null
       : join(",", var.global_managed_policies)
     ),
-    globalPermissionBoundary  = var.global_permission_boundary,
-    iamResourceNamesPrefix    = var.iam_resource_names_prefix
-    iamResourceNamesSuffix    = var.iam_resource_names_suffix
-    iamResourceNamesStatic    = var.iam_resource_names_static
-    supportRoleExpirationDate = var.support_role_expiration_date
+    globalPermissionBoundary          = var.global_permission_boundary,
+    iamResourceNamesPrefix            = var.iam_resource_names_prefix
+    iamResourceNamesSuffix            = var.iam_resource_names_suffix
+    iamResourceNamesStatic            = var.iam_resource_names_static
+    disableCustomerManagedIamPolicies = var.disable_customer_managed_iam_policies
+    supportRoleExpirationDate         = var.support_role_expiration_date
   }
 
   enriched_connectors = [
@@ -67,14 +69,15 @@ locals {
 
   account_level_stack_params = {
     for key, value in merge(local.global_acc_cfn_params, local.regional_acc_cfn_params) :
-    key => value
+    key => tostring(value)
     if value != null
   }
 }
 
 resource "aws_cloudformation_stack" "elastio_account_level_stack" {
   name         = "elastio-account-level-stack"
-  template_url = data.http.cloudformation_template.response_body
+  template_url = "https://elastio-artifacts-vkryvenko-us-east-2.s3.us-east-2.amazonaws.com/dev/feat/worldpay-security-pci-2/account/2024-09-13/cfn-template.json"
+  # template_url = data.http.cloudformation_template.response_body
   tags = {
     "elastio:resource" = "true"
   }
@@ -85,22 +88,29 @@ resource "aws_cloudformation_stack" "elastio_account_level_stack" {
 resource "aws_cloudformation_stack" "elastio_nat_provision_stack" {
   count = var.elastio_nat_provision_stack == null ? 0 : 1
 
-  name = "elastio-nat-provision-lambda"
-  template_url = join(
-    "/",
-    [
-      "https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com",
-      "contrib/elastio-nat-provision-lambda/${var.elastio_nat_provision_stack}",
-      "cloudformation-lambda.yaml"
-    ]
-  )
+  name         = "elastio-nat-provision-lambda"
+  template_url = "https://elastio-artifacts-vkryvenko-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-nat-provision-lambda/v4/cloudformation-lambda.yaml"
+  # template_url = join(
+  #   "/",
+  #   [
+  #     "https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com",
+  #     "contrib/elastio-nat-provision-lambda/${var.elastio_nat_provision_stack}",
+  #     "cloudformation-lambda.yaml"
+  #   ]
+  # )
   tags = {
     "elastio:resource" = "true"
   }
-  capabilities = ["CAPABILITY_IAM"]
+  capabilities = ["CAPABILITY_NAMED_IAM"]
   parameters = {
-    encryptWithCmk = var.encrypt_with_cmk
-    lambdaTracing  = var.lambda_tracing
+    for key, value in {
+      EncryptWithCmk         = var.encrypt_with_cmk
+      LambdaTracing          = var.lambda_tracing
+      IamResourceNamesPrefix = var.iam_resource_names_prefix
+      IamResourceNamesSuffix = var.iam_resource_names_suffix
+    } :
+    key => tostring(value)
+    if value != null
   }
 }
 

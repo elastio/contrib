@@ -98,7 +98,7 @@ Resources:
   lambdaRole:
     Type: AWS::IAM::Role
     Properties:
-      Name: !Join
+      RoleName: !Join
         - ""
         - - !Ref IamResourceNamesPrefix
           - ElastioNatProvisionLambda
@@ -173,7 +173,7 @@ Resources:
   lambdaInvocationRole:
     Type: AWS::IAM::Role
     Properties:
-      Name: !Join
+      RoleName: !Join
         - ""
         - - !Ref IamResourceNamesPrefix
           - ElastioNatProvisionLambdaInvocation
@@ -206,19 +206,10 @@ Resources:
                   - lambda:InvokeFunction
                 Resource: !GetAtt lambdaFunction.Arn
 
-  stateMachineLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /aws/vendedlogs/states/elastio-nat-gateway-provision
-      RetentionInDays: 7
-      Tags:
-        - Key: elastio:resource
-          Value: 'true'
-
   stateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      Name: !Join
+      RoleName: !Join
         - ""
         - - !Ref IamResourceNamesPrefix
           - ElastioNatProvisionStateMachineExecution

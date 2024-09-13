@@ -66,9 +66,17 @@ Parameters:
     Type: String
     AllowedValues: ['true', 'false']
     Default: 'false'
-    Description: >-
-      Encrypt the lambda's environment variables with a KMS key. The KMS key deployed by the
-      regional Elastio Cloud Connector will be used.
+    Description: Add a custom prefix to names of all IAM resources deployed by this stack
+
+  IamResourceNamesPrefix:
+    Type: String
+    Default: ''
+    Description: Prefix for the IAM resources created by this stack
+
+  IamResourceNamesSuffix:
+    Type: String
+    Default: ''
+    Description: Add a custom suffix to names of all IAM resources deployed by this stack
 
 Conditions:
   LambdaTracingCondition: !Equals [!Ref LambdaTracing, 'true']
@@ -90,6 +98,16 @@ Resources:
   lambdaRole:
     Type: AWS::IAM::Role
     Properties:
+      Name: !Join
+        - ""
+        - - !Ref IamResourceNamesPrefix
+          - ElastioNatProvisionLambda
+          - "-"
+          # This stack can be deployed in many regions, so we need to include the region in the name
+          # to avoid name conflicts between regions.
+          - !Ref AWS::Region
+          - !Ref IamResourceNamesSuffix
+
       Tags:
         - Key: elastio:resource
           Value: 'true'
@@ -155,6 +173,16 @@ Resources:
   lambdaInvocationRole:
     Type: AWS::IAM::Role
     Properties:
+      Name: !Join
+        - ""
+        - - !Ref IamResourceNamesPrefix
+          - ElastioNatProvisionLambdaInvocation
+          - "-"
+          # This stack can be deployed in many regions, so we need to include the region in the name
+          # to avoid name conflicts between regions.
+          - !Ref AWS::Region
+          - !Ref IamResourceNamesSuffix
+
       Tags:
         - Key: elastio:resource
           Value: 'true'
@@ -190,6 +218,16 @@ Resources:
   stateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      Name: !Join
+        - ""
+        - - !Ref IamResourceNamesPrefix
+          - ElastioNatProvisionStateMachineExecution
+          - "-"
+          # This stack can be deployed in many regions, so we need to include the region in the name
+          # to avoid name conflicts between regions.
+          - !Ref AWS::Region
+          - !Ref IamResourceNamesSuffix
+
       Tags:
         - Key: elastio:resource
           Value: 'true'

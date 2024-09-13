@@ -62,7 +62,7 @@ Parameters:
     AllowedValues: ['true', 'false']
     Description: Enable AWS X-Ray tracing for the lambda function
 
-  EncryptWithKms:
+  EncryptWithCmk:
     Type: String
     AllowedValues: ['true', 'false']
     Default: 'false'
@@ -78,9 +78,21 @@ Parameters:
     Default: ''
     Description: Add a custom suffix to names of all IAM resources deployed by this stack
 
+  GlobalManagedPolicies:
+    Type: String
+    Default: ''
+    Description: Comma separated list of IAM managed policies ARNs to attach to all Elastio IAM roles
+
+  GlobalPermissionBoundary:
+    Type: String
+    Default: ''
+    Description: The ARN of the IAM managed policy to use as a permission boundary for all Elastio IAM roles
+
 Conditions:
   LambdaTracingCondition: !Equals [!Ref LambdaTracing, 'true']
-  EncryptWithKmsCondition: !Equals [!Ref EncryptWithKms, 'true']
+  EncryptWithCmkCondition: !Equals [!Ref EncryptWithCmk, 'true']
+  GlobalManagedPoliciesNotEmptyCondition: !Not [!Equals [!Ref GlobalManagedPolicies, '']]
+  GlobalPermissionBoundaryNotEmptyCondition: !Not [!Equals [!Ref GlobalPermissionBoundary, '']]
 
 Resources:
   # The default log group that AWS Lambda creates has retention disabled.
@@ -119,11 +131,22 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !If
-          - LambdaTracingCondition
-          - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
-          - !Ref AWS::NoValue
+
+      PermissionsBoundary: !If
+        - GlobalPermissionBoundaryNotEmptyCondition
+        - !Ref GlobalPermissionBoundary
+        - !Ref AWS::NoValue
+
+      ManagedPolicyArns: !If
+        - GlobalManagedPoliciesNotEmptyCondition
+        - !Split
+          - ","
+          - !Join
+            - ","
+            - - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+              - !Ref GlobalManagedPolicies
+        - [arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess]
+
 
       Policies:
         - PolicyName: ElastioNatProvisionPolicy
@@ -187,6 +210,16 @@ Resources:
         - Key: elastio:resource
           Value: 'true'
 
+      PermissionsBoundary: !If
+        - GlobalPermissionBoundaryNotEmptyCondition
+        - !Ref GlobalPermissionBoundary
+        - !Ref AWS::NoValue
+
+      ManagedPolicyArns: !If
+        - GlobalManagedPoliciesNotEmptyCondition
+        - !Split [",", !Ref GlobalManagedPolicies]
+        - !Ref AWS::NoValue
+
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -223,6 +256,16 @@ Resources:
         - Key: elastio:resource
           Value: 'true'
 
+      PermissionsBoundary: !If
+        - GlobalPermissionBoundaryNotEmptyCondition
+        - !Ref GlobalPermissionBoundary
+        - !Ref AWS::NoValue
+
+      ManagedPolicyArns: !If
+        - GlobalManagedPoliciesNotEmptyCondition
+        - !Split [",", !Ref GlobalManagedPolicies]
+        - !Ref AWS::NoValue
+
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -241,7 +284,7 @@ Resources:
                 Resource: !GetAtt natGatewayCleanupStateMachine.Arn
 
   kmsEncryptionKey:
-    Condition: EncryptWithKmsCondition
+    Condition: EncryptWithCmkCondition
     Type: AWS::KMS::Key
     Properties:
       Description: KMS key for Elastio NAT Gateway provisioner stack
@@ -261,7 +304,7 @@ Resources:
             Resource: '*'
 
   kmsEncryptionKeyAlias:
-    Condition: EncryptWithKmsCondition
+    Condition: EncryptWithCmkCondition
     Type: AWS::KMS::Alias
     Properties:
       AliasName: alias/elastio-nat-gateway-provisioner-encryption
@@ -287,7 +330,7 @@ Resources:
         - !Ref AWS::NoValue
 
       KmsKeyArn: !If
-        - EncryptWithKmsCondition
+        - EncryptWithCmkCondition
         - !GetAtt kmsEncryptionKey.Arn
         - !Ref AWS::NoValue
 

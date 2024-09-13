@@ -37,6 +37,7 @@ locals {
     iamResourceNamesStatic            = var.iam_resource_names_static
     disableCustomerManagedIamPolicies = var.disable_customer_managed_iam_policies
     supportRoleExpirationDate         = var.support_role_expiration_date
+    tenantRoleArn                     = "arn:aws:iam::176355207749:role/vkryvenko.development.elastio.us"
   }
 
   enriched_connectors = [
@@ -76,8 +77,7 @@ locals {
 
 resource "aws_cloudformation_stack" "elastio_account_level_stack" {
   name         = "elastio-account-level-stack"
-  template_url = "https://elastio-artifacts-vkryvenko-us-east-2.s3.us-east-2.amazonaws.com/dev/feat/worldpay-security-pci-2/account/2024-09-13/cfn-template.json"
-  # template_url = data.http.cloudformation_template.response_body
+  template_url = data.http.cloudformation_template.response_body
   tags = {
     "elastio:resource" = "true"
   }
@@ -89,15 +89,14 @@ resource "aws_cloudformation_stack" "elastio_nat_provision_stack" {
   count = var.elastio_nat_provision_stack == null ? 0 : 1
 
   name         = "elastio-nat-provision-lambda"
-  template_url = "https://elastio-artifacts-vkryvenko-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-nat-provision-lambda/v4/cloudformation-lambda.yaml"
-  # template_url = join(
-  #   "/",
-  #   [
-  #     "https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com",
-  #     "contrib/elastio-nat-provision-lambda/${var.elastio_nat_provision_stack}",
-  #     "cloudformation-lambda.yaml"
-  #   ]
-  # )
+  template_url = join(
+    "/",
+    [
+      "https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com",
+      "contrib/elastio-nat-provision-lambda/${var.elastio_nat_provision_stack}",
+      "cloudformation-lambda.yaml"
+    ]
+  )
   tags = {
     "elastio:resource" = "true"
   }
@@ -108,6 +107,12 @@ resource "aws_cloudformation_stack" "elastio_nat_provision_stack" {
       LambdaTracing          = var.lambda_tracing
       IamResourceNamesPrefix = var.iam_resource_names_prefix
       IamResourceNamesSuffix = var.iam_resource_names_suffix
+      GlobalManagedPolicies = (
+        var.global_managed_policies == null
+        ? null
+        : join(",", var.global_managed_policies)
+      ),
+      GlobalPermissionBoundary = var.global_permission_boundary,
     } :
     key => tostring(value)
     if value != null
@@ -125,38 +130,41 @@ locals {
   ]
 }
 
-# resource "terraform_data" "elastio_cloud_connector" {
-#   depends_on = [aws_cloudformation_stack.elastio_account_level_stack]
+resource "terraform_data" "elastio_cloud_connector" {
+  depends_on = [aws_cloudformation_stack.elastio_account_level_stack]
 
-#   for_each = {
-#     for request in local.elastio_cloud_connector_deploy_requests :
-#     request.region => request
-#   }
+  for_each = {
+    for request in local.elastio_cloud_connector_deploy_requests :
+    request.region => request
+  }
 
-#   input            = each.value
-#   triggers_replace = each.value
+  input = each.value
+  triggers_replace = {
+    connector      = each.value,
+    acc_cfn_params = local.account_level_stack_params,
+  }
 
-#   provisioner "local-exec" {
-#     command = <<CMD
-#       curl "$elastio_endpoint/deploy-cloud-connector" \
-#         --location \
-#         --fail-with-body \
-#         --show-error \
-#         --retry-all-errors \
-#         --retry 5 \
-#         -X POST \
-#         -H "Authorization: Bearer $elastio_pat" \
-#         -H "Content-Type: application/json; charset=utf-8" \
-#         -d "$request_body"
-#     CMD
+  provisioner "local-exec" {
+    command = <<CMD
+      curl "$elastio_endpoint/deploy-cloud-connector" \
+        --location \
+        --fail-with-body \
+        --show-error \
+        --retry-all-errors \
+        --retry 5 \
+        -X POST \
+        -H "Authorization: Bearer $elastio_pat" \
+        -H "Content-Type: application/json; charset=utf-8" \
+        -d "$request_body"
+    CMD
 
-#     environment = {
-#       elastio_endpoint = local.elastio_endpoint
-#       request_body     = jsonencode(self.input)
+    environment = {
+      elastio_endpoint = local.elastio_endpoint
+      request_body     = jsonencode(self.input)
 
-#       // Using nonsensitive() to workaround the problem that the script's
-#       // output is entirely suppressed: https://github.com/hashicorp/terraform/issues/27154
-#       elastio_pat = nonsensitive(var.elastio_pat)
-#     }
-#   }
-# }
+      // Using nonsensitive() to workaround the problem that the script's
+      // output is entirely suppressed: https://github.com/hashicorp/terraform/issues/27154
+      elastio_pat = nonsensitive(var.elastio_pat)
+    }
+  }
+}

@@ -56,6 +56,24 @@ Parameters:
     AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
     Description: The number of days to retain the log events in the lambda's log group
 
+  LambdaTracing:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable AWS X-Ray tracing for the lambda function
+
+  EncryptWithKms:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >-
+      Encrypt the lambda's environment variables with a KMS key. The KMS key deployed by the
+      regional Elastio Cloud Connector will be used.
+
+Conditions:
+  LambdaTracingCondition: !Equals [!Ref LambdaTracing, 'true']
+  EncryptWithKmsCondition: !Equals [!Ref EncryptWithKms, 'true']
+
 Resources:
   # The default log group that AWS Lambda creates has retention disabled.
   # We don't want to store logs indefinitely, so we create a custom log group with
@@ -83,6 +101,12 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !If
+          - LambdaTracingCondition
+          - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+          - !Ref AWS::NoValue
+
       Policies:
         - PolicyName: ElastioNatProvisionPolicy
           PolicyDocument:
@@ -145,7 +169,7 @@ Resources:
                 - scheduler.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: lambdaInvokePolicy
+        - PolicyName: LambdaInvokePolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -153,6 +177,46 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: !GetAtt lambdaFunction.Arn
+        - PolicyName: CloudwatchLoggingPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # The logging permissions were taken from AWS docs on SFN logging:
+              # https://docs.aws.amazon.com/step-functions/latest/dg/cw-logs.html#cloudwatch-iam-policy
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                # The log group ARN already includes a trailing `:*`. Don't ask me why. Ask AWS -_-
+                # https://github.com/aws-cloudformation/cloudformation-coverage-roadmap/issues/206
+                Resource: '*'
+
+              - Effect: Allow
+                Action:
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+
+                # A wildcard is required here. Even AWS docs on SFN logging say this:
+                # https://docs.aws.amazon.com/step-functions/latest/dg/cw-logs.html#cloudwatch-iam-policy
+                #
+                # > [...] you need to specify * in the Resource field.
+                # > CloudWatch API actions, such as CreateLogDelivery and DescribeLogGroups, do not
+                # > support Resource types defined by Amazon CloudWatch Logs
+                Resource: "*"
+
+  stateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/vendedlogs/states/elastio-nat-gateway-provision
+      RetentionInDays: 7
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
 
   stateMachineExecutionRole:
     Type: AWS::IAM::Role
@@ -169,7 +233,7 @@ Resources:
               Service: events.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: startStateMachinePolicy
+        - PolicyName: StartStateMachinePolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -177,6 +241,33 @@ Resources:
                 Action:
                   - states:StartExecution
                 Resource: !GetAtt natGatewayCleanupStateMachine.Arn
+
+  kmsEncryptionKey:
+    Condition: EncryptWithKmsCondition
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for Elastio NAT Gateway provisioner stack
+      EnableKeyRotation: true
+      PendingWindowInDays: 7
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+
+  kmsEncryptionKeyAlias:
+    Condition: EncryptWithKmsCondition
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/elastio-nat-gateway-provisioner-encryption
+      TargetKeyId: !Ref kmsEncryptionKey
 
   lambdaFunction:
     Type: AWS::Lambda::Function
@@ -191,6 +282,17 @@ Resources:
       MemorySize: !Ref LambdaMemorySize
       Timeout: !Ref LambdaTimeout
       Role: !GetAtt lambdaRole.Arn
+
+      TracingConfig: !If
+        - LambdaTracingCondition
+        - Mode: Active
+        - !Ref AWS::NoValue
+
+      KmsKeyArn: !If
+        - EncryptWithKmsCondition
+        - !GetAtt kmsEncryptionKey.Arn
+        - !Ref AWS::NoValue
+
       Environment:
         Variables:
           NAT_GATEWAY_SCOPE: !Ref NatGatewayScope
@@ -302,8 +404,17 @@ Resources:
       Tags:
         - Key: elastio:resource
           Value: 'true'
-      StateMachineName: elastio-nat-gateway-provision-state-machine
+      StateMachineName: elastio-nat-gateway-provision
       RoleArn: !GetAtt lambdaInvocationRole.Arn
+      # LoggingConfiguration:
+      #   Destinations:
+      #     - CloudWatchLogsLogGroup:
+      #         # The log group ARN already includes a trailing `:*`. Don't ask me why. Ask AWS -_-
+      #         # https://github.com/aws-cloudformation/cloudformation-coverage-roadmap/issues/206
+      #         LogGroupArn: !GetAtt stateMachineLogGroup.Arn
+      #   IncludeExecutionData: false
+      #   Level: ERROR
+
       Definition:
         StartAt: Wait
         States:

@@ -57,6 +57,9 @@ module "elastio" {
         "subnet-0004",
       ]
     }
+
+    # Other optional configuration tweaks. See `module/variables.tf` for more info
+    # iam_resource_names_prefix = "prefix"
   ]
 
   # This input is optional. Here you can specify the version of the NAT provisioning stack.

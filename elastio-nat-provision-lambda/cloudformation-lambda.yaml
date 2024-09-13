@@ -56,6 +56,44 @@ Parameters:
     AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
     Description: The number of days to retain the log events in the lambda's log group
 
+  LambdaTracing:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable AWS X-Ray tracing for the lambda function
+
+  EncryptWithCmk:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: Add a custom prefix to names of all IAM resources deployed by this stack
+
+  IamResourceNamesPrefix:
+    Type: String
+    Default: ''
+    Description: Prefix for the IAM resources created by this stack
+
+  IamResourceNamesSuffix:
+    Type: String
+    Default: ''
+    Description: Add a custom suffix to names of all IAM resources deployed by this stack
+
+  GlobalManagedPolicies:
+    Type: String
+    Default: ''
+    Description: Comma separated list of IAM managed policies ARNs to attach to all Elastio IAM roles
+
+  GlobalPermissionBoundary:
+    Type: String
+    Default: ''
+    Description: The ARN of the IAM managed policy to use as a permission boundary for all Elastio IAM roles
+
+Conditions:
+  LambdaTracingCondition: !Equals [!Ref LambdaTracing, 'true']
+  EncryptWithCmkCondition: !Equals [!Ref EncryptWithCmk, 'true']
+  GlobalManagedPoliciesNotEmptyCondition: !Not [!Equals [!Ref GlobalManagedPolicies, '']]
+  GlobalPermissionBoundaryNotEmptyCondition: !Not [!Equals [!Ref GlobalPermissionBoundary, '']]
+
 Resources:
   # The default log group that AWS Lambda creates has retention disabled.
   # We don't want to store logs indefinitely, so we create a custom log group with
@@ -72,6 +110,16 @@ Resources:
   lambdaRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Join
+        - ""
+        - - !Ref IamResourceNamesPrefix
+          - ElastioNatProvisionLambda
+          - "-"
+          # This stack can be deployed in many regions, so we need to include the region in the name
+          # to avoid name conflicts between regions.
+          - !Ref AWS::Region
+          - !Ref IamResourceNamesSuffix
+
       Tags:
         - Key: elastio:resource
           Value: 'true'
@@ -83,6 +131,23 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
+
+      PermissionsBoundary: !If
+        - GlobalPermissionBoundaryNotEmptyCondition
+        - !Ref GlobalPermissionBoundary
+        - !Ref AWS::NoValue
+
+      ManagedPolicyArns: !If
+        - GlobalManagedPoliciesNotEmptyCondition
+        - !Split
+          - ","
+          - !Join
+            - ","
+            - - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+              - !Ref GlobalManagedPolicies
+        - [arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess]
+
+
       Policies:
         - PolicyName: ElastioNatProvisionPolicy
           PolicyDocument:
@@ -131,9 +196,29 @@ Resources:
   lambdaInvocationRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Join
+        - ""
+        - - !Ref IamResourceNamesPrefix
+          - ElastioNatProvisionLambdaInvocation
+          - "-"
+          # This stack can be deployed in many regions, so we need to include the region in the name
+          # to avoid name conflicts between regions.
+          - !Ref AWS::Region
+          - !Ref IamResourceNamesSuffix
+
       Tags:
         - Key: elastio:resource
           Value: 'true'
+
+      PermissionsBoundary: !If
+        - GlobalPermissionBoundaryNotEmptyCondition
+        - !Ref GlobalPermissionBoundary
+        - !Ref AWS::NoValue
+
+      ManagedPolicyArns: !If
+        - GlobalManagedPoliciesNotEmptyCondition
+        - !Split [",", !Ref GlobalManagedPolicies]
+        - !Ref AWS::NoValue
 
       AssumeRolePolicyDocument:
         Version: 2012-10-17
@@ -145,7 +230,7 @@ Resources:
                 - scheduler.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: lambdaInvokePolicy
+        - PolicyName: LambdaInvokePolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -157,9 +242,29 @@ Resources:
   stateMachineExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: !Join
+        - ""
+        - - !Ref IamResourceNamesPrefix
+          - ElastioNatProvisionStateMachineExecution
+          - "-"
+          # This stack can be deployed in many regions, so we need to include the region in the name
+          # to avoid name conflicts between regions.
+          - !Ref AWS::Region
+          - !Ref IamResourceNamesSuffix
+
       Tags:
         - Key: elastio:resource
           Value: 'true'
+
+      PermissionsBoundary: !If
+        - GlobalPermissionBoundaryNotEmptyCondition
+        - !Ref GlobalPermissionBoundary
+        - !Ref AWS::NoValue
+
+      ManagedPolicyArns: !If
+        - GlobalManagedPoliciesNotEmptyCondition
+        - !Split [",", !Ref GlobalManagedPolicies]
+        - !Ref AWS::NoValue
 
       AssumeRolePolicyDocument:
         Version: 2012-10-17
@@ -169,7 +274,7 @@ Resources:
               Service: events.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: startStateMachinePolicy
+        - PolicyName: StartStateMachinePolicy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -177,6 +282,33 @@ Resources:
                 Action:
                   - states:StartExecution
                 Resource: !GetAtt natGatewayCleanupStateMachine.Arn
+
+  kmsEncryptionKey:
+    Condition: EncryptWithCmkCondition
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for Elastio NAT Gateway provisioner stack
+      EnableKeyRotation: true
+      PendingWindowInDays: 7
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+
+  kmsEncryptionKeyAlias:
+    Condition: EncryptWithCmkCondition
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/elastio-nat-gateway-provisioner-encryption
+      TargetKeyId: !Ref kmsEncryptionKey
 
   lambdaFunction:
     Type: AWS::Lambda::Function
@@ -191,6 +323,17 @@ Resources:
       MemorySize: !Ref LambdaMemorySize
       Timeout: !Ref LambdaTimeout
       Role: !GetAtt lambdaRole.Arn
+
+      TracingConfig: !If
+        - LambdaTracingCondition
+        - Mode: Active
+        - !Ref AWS::NoValue
+
+      KmsKeyArn: !If
+        - EncryptWithCmkCondition
+        - !GetAtt kmsEncryptionKey.Arn
+        - !Ref AWS::NoValue
+
       Environment:
         Variables:
           NAT_GATEWAY_SCOPE: !Ref NatGatewayScope
@@ -302,8 +445,9 @@ Resources:
       Tags:
         - Key: elastio:resource
           Value: 'true'
-      StateMachineName: elastio-nat-gateway-provision-state-machine
+      StateMachineName: elastio-nat-gateway-provision
       RoleArn: !GetAtt lambdaInvocationRole.Arn
+
       Definition:
         StartAt: Wait
         States:

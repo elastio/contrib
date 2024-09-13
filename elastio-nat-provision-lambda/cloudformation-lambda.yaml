@@ -177,37 +177,6 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: !GetAtt lambdaFunction.Arn
-        - PolicyName: CloudwatchLoggingPolicy
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              # The logging permissions were taken from AWS docs on SFN logging:
-              # https://docs.aws.amazon.com/step-functions/latest/dg/cw-logs.html#cloudwatch-iam-policy
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                # The log group ARN already includes a trailing `:*`. Don't ask me why. Ask AWS -_-
-                # https://github.com/aws-cloudformation/cloudformation-coverage-roadmap/issues/206
-                Resource: '*'
-
-              - Effect: Allow
-                Action:
-                  - logs:GetLogDelivery
-                  - logs:UpdateLogDelivery
-                  - logs:DeleteLogDelivery
-                  - logs:ListLogDeliveries
-                  - logs:PutResourcePolicy
-                  - logs:DescribeResourcePolicies
-                  - logs:DescribeLogGroups
-
-                # A wildcard is required here. Even AWS docs on SFN logging say this:
-                # https://docs.aws.amazon.com/step-functions/latest/dg/cw-logs.html#cloudwatch-iam-policy
-                #
-                # > [...] you need to specify * in the Resource field.
-                # > CloudWatch API actions, such as CreateLogDelivery and DescribeLogGroups, do not
-                # > support Resource types defined by Amazon CloudWatch Logs
-                Resource: "*"
 
   stateMachineLogGroup:
     Type: AWS::Logs::LogGroup
@@ -406,14 +375,6 @@ Resources:
           Value: 'true'
       StateMachineName: elastio-nat-gateway-provision
       RoleArn: !GetAtt lambdaInvocationRole.Arn
-      # LoggingConfiguration:
-      #   Destinations:
-      #     - CloudWatchLogsLogGroup:
-      #         # The log group ARN already includes a trailing `:*`. Don't ask me why. Ask AWS -_-
-      #         # https://github.com/aws-cloudformation/cloudformation-coverage-roadmap/issues/206
-      #         LogGroupArn: !GetAtt stateMachineLogGroup.Arn
-      #   IncludeExecutionData: false
-      #   Level: ERROR
 
       Definition:
         StartAt: Wait

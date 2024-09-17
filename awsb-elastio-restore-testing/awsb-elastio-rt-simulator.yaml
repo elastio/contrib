@@ -1,0 +1,1471 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to deploy the Restore Simulator for Elastio
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Elastio Integration Configuration
+        Parameters: 
+            - LogsBucketName  
+            - ElastioScanTag
+            - RPForwardTag          
+            - ElastioScanAfterCopyDestination 
+            - EnableSHIntegration
+            - EnableObserverIntegration           
+            - ElastioTagKey
+            - ElastioTagValue
+            - ElastioDefaultVaultName            
+    ParameterLabels:
+      LogsBucketName:
+        default: S3 Bucket for Elastio Logs and Data 
+      ElastioScanTag:
+        default: RecoveryPoint Tag to initiate Elastio Scan
+      RPForwardTag:
+        default: RecoveryPoint Tag to initiate an AWS Backup Copy       
+      ElastioScanAfterCopyDestination:
+        default: The AWS Backup Vault to copy to after a scan  
+      EnableSHIntegration:
+        default: 'Choose if SecurityHub events need to be generated in anomalies are detected'  
+      EnableObserverIntegration:
+        default: 'Choose if events need to be sent to Observer solution for reporting integration'  
+      ElastioTagKey:
+        default: 'Tag key used to control access to the EventBus'
+      ElastioTagValue:
+        default: 'Tag value used to control access to the EventBus'    
+      ElastioDefaultVaultName:
+        default: 'The Default Elastio Vault Name'    
+Parameters:
+  LogsBucketName:
+    Description: The Name of the S3 Bucket where the Scan Logs and Reports are to be stored. 
+    Type: String
+  ElastioScanTag:
+    Description: The Tag in an AWS Backup RecoveryPoint that will initiate an Elastio Scan. Supports values scan, ingest, ingest-and-scan
+    Type: String
+    Default: 'elastio:restore-test'
+  RPForwardTag:
+    Description: The Tag in an AWS Backup RecoveryPoint that will initiate an AWS Backup Copy to another Vault mentioned in ElastioScanAfterCopyDestination
+    Type: String
+    Default: 'lag:fwd' 
+  ElastioSupportedRTForRestoreSimulation: 
+    Description: The Resource Type supported for AWS Backup Restore Testing Simulation
+    Type: String
+    Default: 'VirtualMachine'   
+  ElastioScanAfterCopyDestination:
+    Description: The Arn of the AWS Backup Vault to copy after a successful Elastio Scan
+    Type: String
+  ElastioTagKey:
+    Type: String
+    Description: 'Tag key set to elastio resources for EB Permission.[DO NOT MODIFY Unless Advised]'
+    Default: 'elastio:iscan-event-bus'
+  ElastioTagValue:
+    Type: String
+    Description: 'Tag value set to elastio resources for EB Permission.[DO NOT MODIFY Unless Advised]'
+    Default: 'true' 
+  ElastioDefaultVaultName:
+    Type: String
+    Description: 'The Name of the Elastio Default Vault Name.[DO NOT MODIFY Unless Advised]'
+    Default: 'default'   
+  RestoreSimulationInstanceType:
+    Type: String
+    Description: 'The instance type for the Restore Simulated Virtual Machine.[DO NOT MODIFY Unless Advised]'
+    Default: 't1.micro' 
+  EnableSHIntegration:
+    Type: String
+    Default: False
+    AllowedValues:
+      - True
+      - False
+    Description: SecurityHub should be enabled.Refer to https://aws.amazon.com/security-hub/
+  EnableObserverIntegration:
+    Type: String
+    Default: False
+    AllowedValues:
+      - True
+      - False
+    Description: Observer should be configured.Refer to https://aws.amazon.com/blogs/storage/obtain-aggregated-daily-cross-account-multi-region-aws-backup-reporting/       
+Resources: 
+
+  # Restore Simulator Lambda Function
+  ElastioRTSimulatorLambda:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      FunctionName: "ElastioRTSimulatorLambda"
+      Handler: "index.lambda_handler"
+      Role: !GetAtt ElastioRTSimulatorLambdaRole.Arn
+      Environment:
+        Variables:
+          ElastioStatusEB : !Ref ElastioRTSimulatorEventBus 
+          LogsBucketName: !Ref LogsBucketName
+          ElastioImportLambdaARN : !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:elastio-bg-jobs-service-aws-backup-integration"
+          ElastioScanTag: !Ref ElastioScanTag
+          RPForwardTag: !Ref RPForwardTag
+          EnableSHIntegration: !Ref EnableSHIntegration
+          EnableObserverIntegration: !Ref EnableObserverIntegration          
+          ElastioScanAfterCopyDestination: !Ref ElastioScanAfterCopyDestination
+          AWSBackupCopyIamRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/service-role/AWSBackupDefaultServiceRole'
+          AWSBackupEventsBusArn: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default"      
+          ElastioSupportedRTForRestoreSimulation: !Ref ElastioSupportedRTForRestoreSimulation
+          RestoreSimulationInstanceType: !Ref RestoreSimulationInstanceType
+          ElastioDefaultVaultName: !Ref ElastioDefaultVaultName
+      Runtime: python3.12
+      Architectures: 
+            - arm64
+      Timeout: 900              
+      Code:
+        ZipFile: |
+            # pylint: disable = C0103, C0116,C0303,R0902, W1203, C0301, W0311, W0718 , W1514, W0719
+            #!/usr/bin/env python
+            # -*- coding: utf-8 -*-
+            import os
+            from datetime import timezone
+            import datetime
+            import logging
+            import traceback
+            import json
+            import uuid
+            import boto3
+            from botocore.exceptions import ClientError
+
+            logger = logging.getLogger()
+            logger.setLevel(logging.INFO)
+            sechub_client = boto3.client('securityhub')
+
+            RT_STATUS_MESSAGE_MAX_LENGTH=1000
+            ELASTIO_DEFAULT_VAULT_NAME = os.environ.get('ElastioDefaultVaultName') 
+            if not ELASTIO_DEFAULT_VAULT_NAME:
+                logger.info('NO Default Elastio Vault Name mentioned. Defaulting to default')   
+                ELASTIO_DEFAULT_VAULT_NAME = 'default'
+
+            INTEGRATION_DEFAULT_SG_NAME = 'ElastioSGForDefaultVPCAccess'
+            INTEGRATION_DEFAULT_SG_DESCRIPTION = 'Allow all traffic to / from ElastioSG for default vault'
+            ELASTIO_SOURCE_SG = f'elastio-vault-{ELASTIO_DEFAULT_VAULT_NAME}-batch-security-group'
+
+            #Get the tags that this lambda will look for in an RP before sending to elastio
+            ENABLE_ELASTIO_SCAN_TAG = os.environ.get('ElastioScanTag') 
+            if not ENABLE_ELASTIO_SCAN_TAG:
+                logger.info('NO Tags defined to filter inside an RP. Defaulting to elastio:restore-test')   
+                ENABLE_ELASTIO_SCAN_TAG = 'elastio:restore-test'
+
+            RP_FWD_TAG = os.environ.get('RPForwardTag') 
+            if not RP_FWD_TAG:
+                logger.info('NO Tags defined to decide an RP Forward under env variable RPForwardTag. Defaulting to rp:fwd')   
+                RP_FWD_TAG = 'rp:fwd'    
+
+            ELASTIO_SCAN_AFTER_COPY_DESTINATION = os.environ.get('ElastioScanAfterCopyDestination')
+            if not ELASTIO_SCAN_AFTER_COPY_DESTINATION:
+                logger.error('No Copy Destination configured. The Copy step will be Skipped.')   
+
+            AWSB_COPY_IAM_ROLE = os.environ.get('AWSBackupCopyIamRole')
+            if not AWSB_COPY_IAM_ROLE:
+                logger.error('No IAM Role specified for Copy Operation. The Copy step will be Skipped.') 
+
+            def get_default_vpc_id():
+                try:
+                    ec2_client = boto3.client('ec2')
+                    response = ec2_client.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}])
+                    default_vpc_id = response['Vpcs'][0]['VpcId']
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} in get_default_vpc_id")
+                return default_vpc_id         
+
+            def tag_recovery_point_with_meta_data(resource_type,recovery_point_arn):
+                """
+                This method is responsible for tagging an EC2 RP with the constiuent EBS Volume Ids
+                """    
+                new_tag_list = {}
+                resource_id,partition, region, account_id = get_resource_id_from_arn(recovery_point_arn)
+                logger.info(f'tag_recovery_point_with_meta_data for {partition}:{account_id}:{region}:{resource_type}:{resource_id} from {recovery_point_arn}')
+                resource_type = resource_type.lower()
+                new_tag_list = {
+                        "awsb:original-asset:account-id": account_id,
+                        "awsb:original-asset:region": region,
+                        "awsb:original-asset:rp-rn": recovery_point_arn
+                    }              
+                try:
+                    if resource_type in ("ec2"):        
+                        # Extract backing snapshots from AMI Id
+                        # bot3 API services/ec2.html#EC2.Client.describe_images
+                        ec2 = boto3.client("ec2")
+                        describe_images_info = ec2.describe_images(ImageIds=[resource_id])
+                        if "ResponseMetadata" in describe_images_info:
+                            del describe_images_info["ResponseMetadata"]
+
+                        for image in describe_images_info["Images"]:
+                            for block_dev_mapping in image["BlockDeviceMappings"]:
+                                device_name=block_dev_mapping.get('DeviceName')
+                                ebs_data = block_dev_mapping.get("Ebs")
+                                if ebs_data:
+                                    snapshot_id = ebs_data["SnapshotId"]
+                                    volume_id = get_volume_id_from_snapshot(snapshot_id)
+                                    logger.info(f"Adding volume_id : {volume_id} to tag_list under : {device_name}")
+                                    new_tag_list[f"awsb:original-asset:vol:{device_name}"] = volume_id
+
+                    #Set the tags on resources
+                    set_tags_by_resource(resource_type, resource_id,recovery_point_arn,new_tag_list)                        
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} processing tag_recovery_point_with_meta_data for resource_id : {resource_id}")
+
+            def get_volume_id_from_snapshot(snapshot_id):
+                """
+                This method is responsible getting the volume id from the given snapshot id
+                """        
+                # Create an EC2 client using Boto3
+                ec2_client = boto3.client('ec2')
+                volume_id = None
+                # Describe the snapshot using its ID
+                response = ec2_client.describe_snapshots(SnapshotIds=[snapshot_id])
+                
+                # Extract the volume ID from the response
+                if 'Snapshots' in response and len(response['Snapshots']) > 0:
+                    volume_id = response['Snapshots'][0]['VolumeId']
+                else:
+                    logger.error(f"No snapshot found with ID: {snapshot_id}")
+                return volume_id    
+                
+            def get_resource_id_from_arn(recovery_point_arn):
+                """
+                Helper function to get the ResourceId and other details from a given Recovery Point Arn.
+                """
+                # Split the ARN by ':'
+                #arn:aws:backup:us-east-1:795103076281:recovery-point:continuous:s3-lens-production-por9tjia4fjz-7e0f6351
+                parts = recovery_point_arn.split(':')              
+                # Check if the ARN is properly formatted
+                if len(parts) < 6:
+                    raise ValueError("Invalid ARN format")
+                
+                if -1 != recovery_point_arn.find("/"):
+                    # Handle for EC2 and EBS
+                    resource_id = recovery_point_arn.split("/")[1]
+                # Assumed to like  "ResourceArn":"arn:aws:rds:{RegionId}:{AccountId}:db:{DBName}"
+                elif -1 != recovery_point_arn.find(":::"):
+                    # Handle for S3
+                    resource_id = recovery_point_arn.split(":::")[1]
+                else:
+                    # Extract resource_id,partition, region, and account ID
+                    resource_id = parts[-1]   
+                
+                partition = parts[1]
+                region = parts[3]
+                account_id = parts[4]
+                if not account_id:
+                    account_id = boto3.client("sts").get_caller_identity()["Account"]    
+                
+                return resource_id,partition, region, account_id
+
+            def set_tags_by_resource(resource_type, resource_id,recovery_point_arn,new_tag_list):
+                """
+                Helper function to set the tags on a given resource. 
+                """
+                logger.info(f"Starting set_tags_by_resource {recovery_point_arn} with new tag list :{new_tag_list}")
+                resource_type = resource_type.lower()
+                tags_to_apply=None
+                if resource_type in ('ec2', 'ebs'):
+                    # Create a list of tag dictionaries in the format required by create_tags
+                    tags_to_apply = [{'Key': key, 'Value': value} for key, value in new_tag_list.items() if not key.startswith('aws:')]           
+                    logger.info(f"Before - Applying {tags_to_apply} to {resource_id}")
+                    ec2_client = boto3.client('ec2')
+                    ec2_client.create_tags(DryRun=False, Resources=[resource_id], Tags=tags_to_apply)
+
+                elif ':backup:' in recovery_point_arn:
+                    backup_client = boto3.client('backup')
+                    logger.info(f"Applying {new_tag_list} to {recovery_point_arn}")
+                    backup_client.tag_resource(ResourceArn=recovery_point_arn, Tags=new_tag_list)                         
+                else:
+                    logger.info(f"{resource_type} Not Supported Yet. Skipping Processing")
+
+
+            def create_security_group(group_name, vpc_id, description):
+                ec2_client = boto3.client('ec2')
+
+                # Create the security group
+                response = ec2_client.create_security_group(
+                    GroupName=group_name,
+                    Description=description,
+                    VpcId=vpc_id
+                )
+
+                security_group_id = response['GroupId']
+                logger.info(f"Security Group created with ID: {security_group_id}")
+
+                return security_group_id
+
+            def allow_all_traffic_from_elastio_sg(security_group_id):
+                
+                try:
+                    ec2_client = boto3.client('ec2')
+
+                    # Authorize inbound traffic from specified security groups
+                    ec2_client.authorize_security_group_ingress(
+                        GroupId=security_group_id,
+                        IpPermissions=[
+                            {
+                                'IpProtocol': '-1',
+                                'UserIdGroupPairs': [{'GroupName': ELASTIO_SOURCE_SG} ]
+                            }
+                        ]
+                    )
+
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} in attach_security_group_to_default_vpc")       
+
+
+            def attach_elastio_sg_to_default_sg():
+
+                try:
+                    ec2_client = boto3.client('ec2')
+                    security_group_id = None
+                    response = ec2_client.describe_security_groups(Filters=[{'Name': 'group-name', 'Values': [INTEGRATION_DEFAULT_SG_NAME]}])
+                    security_groups = response.get('SecurityGroups')
+                    
+                    if not security_groups or len(security_groups) < 1:
+                        response = ec2_client.describe_vpcs(Filters=[{'Name': 'isDefault', 'Values': ['true']}])
+                        default_vpc_id = response['Vpcs'][0]['VpcId']
+
+                        # Create the security group
+                        security_group_id = create_security_group(INTEGRATION_DEFAULT_SG_NAME, default_vpc_id, INTEGRATION_DEFAULT_SG_DESCRIPTION)
+
+                        # Allow all traffic from existing security groups
+                        allow_all_traffic_from_elastio_sg(security_group_id)
+
+                    else:
+                        security_group_id = response['SecurityGroups'][0]['GroupId']
+                        logger.info(f'ELASTIO_SOURCE_SG : {INTEGRATION_DEFAULT_SG_NAME} already exists. NO Action done. ')
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} managing SGs in attach_elastio_sg_to_default_sg")  
+
+                return security_group_id 
+
+            def get_default_vpc_subnets():
+
+                subnets = None
+                try:
+                    ec2_client = boto3.client('ec2')
+                    default_vpc_id = get_default_vpc_id()
+                    subnets = ec2_client.describe_subnets(Filters=[{'Name': 'vpc-id', 'Values': [default_vpc_id]}])['Subnets']
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} finding default subnets in get_default_vpc_subnets")
+                return subnets
+
+            def create_efs_mount_targets(efs_file_system_id, subnets, security_group_id):
+                try:
+                    efs_client = boto3.client('efs')
+                    if subnets:
+                        for subnet in subnets:
+                            subnet_id = subnet['SubnetId']
+                            response = efs_client.create_mount_target(
+                                FileSystemId=efs_file_system_id,
+                                SubnetId=subnet_id,
+                                SecurityGroups=[security_group_id]
+                            )
+
+                            logger.info(f"Mount target created for subnet {subnet_id}: {response['MountTargetId']}")
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} finding default subnets in get_default_vpc_subnets")   
+
+            def get_efs_resource_id(efs_arn):
+                # Split the ARN by colon (':') and get the last part
+                # which is the resource ID (e.g., 'fs-12345678')
+                parts = efs_arn.split('file-system/')
+                resource_id = parts[-1]
+
+                return resource_id
+
+            def find_aws_backup_vault_name(recovery_point_arn):
+                rp_backup_vault_name = None
+                logger.info(f'Starting expensive search of Backup Vault name using ARN : {recovery_point_arn}')
+                try:
+
+                    backup_client = boto3.client('backup')
+
+                    all_backup_vaults =[]
+                    # List all available backup vaults
+                    response = backup_client.list_backup_vaults(ByVaultType='BACKUP_VAULT',ByShared=False)
+                    all_backup_vaults = response["BackupVaultList"]
+                    while "NextToken" in response:
+                        response = backup_client.list_backup_vaults(ByVaultType='BACKUP_VAULT',ByShared=False,NextToken=response["NextToken"])
+                        all_backup_vaults.extend(response["BackupVaultList"])      
+
+
+                    # List all available LAG vaults
+                    response = backup_client.list_backup_vaults(ByVaultType='LOGICALLY_AIR_GAPPED_BACKUP_VAULT',ByShared=True)
+                    all_backup_vaults.extend(response["BackupVaultList"])
+                    while "NextToken" in response:
+                        response = backup_client.list_backup_vaults(ByVaultType='LOGICALLY_AIR_GAPPED_BACKUP_VAULT',ByShared=True,NextToken=response["NextToken"])
+                        all_backup_vaults.extend(response["BackupVaultList"])      
+
+                    logger.info(f'all_backup_vaults : {all_backup_vaults}')
+
+                    all_recovery_points = []
+                    # Search for the target ARN across vaults
+                    for backup_vault in all_backup_vaults:
+                        backup_vault_name = backup_vault['BackupVaultName']
+                        backup_vault_arn = backup_vault['BackupVaultArn']
+                        
+                        parts = backup_vault_arn.split(":")
+                        backup_vault_account_id = parts[4] if len(parts) >= 5 else None
+
+                        logger.info(f'looking for {recovery_point_arn} in {backup_vault_name}')
+                        # List recovery points in the current vault
+                        response = backup_client.list_recovery_points_by_backup_vault(BackupVaultName=backup_vault_name,BackupVaultAccountId=backup_vault_account_id)
+                        all_recovery_points = response["RecoveryPoints"]
+                        while "NextToken" in response:
+                            response = backup_client.list_recovery_points_by_backup_vault(BackupVaultName=backup_vault_name,BackupVaultAccountId=backup_vault_account_id,NextToken=response["NextToken"])
+                            all_recovery_points.extend(response["RecoveryPoints"])  
+
+
+                        # Check if the target ARN is in the current vault
+                        for recovery_point in all_recovery_points:
+                            if recovery_point['RecoveryPointArn'] == recovery_point_arn:
+                                logger.info(f'Matched recovery_point : {recovery_point} for ARN : {recovery_point_arn}')
+                                rp_backup_vault_name = recovery_point['BackupVaultName']
+                                break
+                        if rp_backup_vault_name:
+                            break
+
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} searching for recovery point ARN")        
+                
+                return rp_backup_vault_name
+
+            def prep_for_efs_restore_test(restored_resource_id):
+                logger.info(f'Processing prep_for_efs_restore_test for :{restored_resource_id}')
+                #Create and Attach the SGs as required
+                security_group_id = attach_elastio_sg_to_default_sg()
+
+                # Get subnets in the default VPC to prepare mount targets
+                default_vpc_subnets = get_default_vpc_subnets()
+
+                if default_vpc_subnets:
+                    # Create EFS mount targets in the default VPC subnets
+                    create_efs_mount_targets(restored_resource_id, default_vpc_subnets, security_group_id) 
+                else:
+                    logger.error("Error getting default_vpc_subnets. Elastio test will fail")
+
+
+            def handle_backup_event(event):
+                """
+                This method is responsible for processing the AWS Backup Events to initiate 
+                an elastio scan
+                """
+                try:
+                    detail_type = event.get("detail-type")
+                    event_detail = event.get("detail")
+                    job_event_state = event_detail.get("state")
+                    resources = event.get('resources')
+                    if not job_event_state:
+                        # Hack
+                        job_event_state = event_detail.get("status")        
+                    recovery_point_arn = None
+                    for resource in resources:
+                        if ':backup-vault:' not in resource:
+                            recovery_point_arn = resource
+                    tag_list = None
+                    if job_event_state != 'COMPLETED':
+                        logger.info(f'Combination of detail_type : {detail_type} and job_event_state :{job_event_state} NOT handled !!')
+                        return
+                    else:
+                        backup_client = boto3.client('backup')
+                        response = backup_client.list_tags(ResourceArn=recovery_point_arn)
+                        tag_list = response.get('Tags')            
+                    logger.info(f'tag_list : {tag_list}')
+                    SUPPORTED_TYPE_FOR_SIMULATION = os.environ.get('ElastioSupportedRTForRestoreSimulation')
+                    if not SUPPORTED_TYPE_FOR_SIMULATION:
+                        logger.info('NO supported ResourceType defined for RestoreSimulation. Defaulting to VirtualMachine')
+                        SUPPORTED_TYPE_FOR_SIMULATION = 'VirtualMachine'
+
+                    if detail_type == "Recovery Point State Change" and job_event_state =="COMPLETED":
+                        logger.info(f'Handling AWS Backup event for :{job_event_state} and {detail_type} for recovery_point_arn:{recovery_point_arn}') 
+                        backup_vault_name = event_detail.get('backupVaultName')
+                        iam_role_arn=event_detail.get('iamRoleArn')
+                        if recovery_point_arn:                
+                            response = backup_client.describe_recovery_point(
+                                BackupVaultName=backup_vault_name,
+                                RecoveryPointArn=recovery_point_arn)
+                            resource_type = response.get('ResourceType')
+                            enable_extended_tagging = os.environ.get('EnableExtendedTagging')
+                            if enable_extended_tagging:
+                                logger.info(f'Extended Tagging is enabled for Arn : {recovery_point_arn}')
+                                tag_recovery_point_with_meta_data(resource_type,recovery_point_arn)   
+
+                            enable_elastio_scan = ENABLE_ELASTIO_SCAN_TAG in tag_list
+                            if resource_type == SUPPORTED_TYPE_FOR_SIMULATION and enable_elastio_scan:
+                                logger.info(f'{recovery_point_arn} of type : {resource_type} is enabled for Elastio Scan')
+                                response = backup_client.get_recovery_point_restore_metadata(BackupVaultName=backup_vault_name,RecoveryPointArn=recovery_point_arn)
+                                restore_meta_data = response.get('RestoreMetadata')
+                                if restore_meta_data:
+                                    RS_INSTANCE_TYPE = os.environ.get('RestoreSimulationInstanceType')
+                                    if not RS_INSTANCE_TYPE:
+                                        logger.info('NO supported RestoreSimulationInstanceType defined. Defaulting to t1.micro')
+                                        RS_INSTANCE_TYPE = 't1.micro'
+
+                                    default_vpc_id = get_default_vpc_id()
+                                    if not default_vpc_id:
+                                        raise Exception('Default VPC missing!')
+                                    subnet_ids = get_default_vpc_subnets()
+                                    if len(subnet_ids) > 0:
+                                        default_subnet_id = subnet_ids[0]['SubnetId']
+                                    else:
+                                        raise Exception('Not Default Subnets Exist. Stopping Restore Simulation!')
+                                    #Create and Attach the SGs as required
+                                    attach_elastio_sg_to_default_sg()                        
+                                    logger.info(f'Processing Default VPC : {default_vpc_id} with Subnet : {default_subnet_id}')
+                                    #https://docs.aws.amazon.com/aws-backup/latest/devguide/restoring-vm.html
+                                    meta_data = {
+                                        "EbsOptimized": "false",
+                                        "InstanceInitiatedShutdownBehavior": "stop",
+                                        "InstanceType": RS_INSTANCE_TYPE ,
+                                        "RestoreTo": "EC2Instance",
+                                        "SubnetId": default_subnet_id,
+                                        "VpcId": default_vpc_id
+                                    }
+
+                                    logger.info(f'Launching Restore Job for : {resource_type}:{recovery_point_arn} with meta_data :{meta_data} using :{iam_role_arn}')
+                                    response = backup_client.start_restore_job(
+                                        RecoveryPointArn=recovery_point_arn,
+                                        IamRoleArn=iam_role_arn,
+                                        ResourceType=resource_type,
+                                        Metadata=meta_data
+                                    )
+                                    restore_job_id = response['RestoreJobId']
+                                    logger.info(f'Launched AWS Backup Restore Job with restore_job_id :{restore_job_id}')
+
+                                    rt_workflow_tag = {
+                                            "awsb:rt-simulator:restore-job-id": restore_job_id
+                                        } 
+                                    #Apply a tracking tag to this RT simulator job
+                                    backup_client = boto3.client('backup')
+                                    logger.info(f"Applying {rt_workflow_tag} to {recovery_point_arn} for handling RT Simulation")
+                                    backup_client.tag_resource(ResourceArn=recovery_point_arn, Tags=rt_workflow_tag)                                      
+                                else:
+                                    logger.error(f'Restore Metadata is missing. Skipping Restore Test Simulation for {backup_vault_name}:{recovery_point_arn}')
+                            else:
+                                logger.error(f'ResourceType :{resource_type} in {backup_vault_name}:{recovery_point_arn} not enabled via {ENABLE_ELASTIO_SCAN_TAG}')
+                                    
+
+                    #Handle only COMPLETED Restore Job completion events
+                    elif detail_type == "Restore Job State Change":
+                        restore_job_id = event_detail.get('restoreJobId')
+                        logger.info(f'Processing restore_job_id :{restore_job_id}')
+                        rt_plan_arn = event_detail.get('restoreTestingPlanArn')
+                        if rt_plan_arn:
+                            logger.info(f'restore_job_id :{restore_job_id} part of rt_plan : {rt_plan_arn}')
+                        else:
+                            logger.info(f'restore_job_id :{restore_job_id} part NOT part of any rt_plan')
+                            rt_plan_arn='on-demand'
+
+                        created_resource_arn = event_detail.get('createdResourceArn')
+                        resource_type = event_detail.get('resourceType')
+                        job_event_state = event_detail.get('status')
+                        logger.info(f'Processing :{resource_type}:{created_resource_arn} under job_event_state :{job_event_state}' )
+
+                        recovery_point_arn = None
+                        for resource in resources:
+                            if ':backup-vault:' not in resource:
+                                recovery_point_arn = resource
+
+                        backup_client = boto3.client('backup')
+                        response = backup_client.list_tags(ResourceArn=recovery_point_arn)
+                        tag_list = response.get('Tags')
+                        enable_elastio_scan = ENABLE_ELASTIO_SCAN_TAG in tag_list
+                        restore_job_id = event_detail.get('restoreJobId')
+
+                        #Existence of Scan enable or the Lambda trigger tag
+                        if enable_elastio_scan:
+                            backup_vault_name = find_aws_backup_vault_name(recovery_point_arn)
+                            logger.info(f"Elastio scanning enabled for {backup_vault_name}:{recovery_point_arn} via tag_list : {tag_list}")
+                            elastio_status_eb = os.environ.get('ElastioStatusEB')
+                            if not elastio_status_eb:
+                                logger.info('ElastioStatusEB env variable NOT defined. Defaulting to elastio-scan-results.')
+                                elastio_status_eb = 'elastio-scan-results'
+                            
+                            elastio_lambda_arn = os.environ.get('ElastioImportLambdaARN')
+                            if not elastio_lambda_arn:
+                                LAMBDA_TRIGGER_TAG = os.environ.get("LambdaTriggerTag")
+                                if not LAMBDA_TRIGGER_TAG:
+                                    elastio_lambda_arn = tag_list[LAMBDA_TRIGGER_TAG].lower()
+                                else:
+                                    raise Exception('ElastioImportLambdaARN is missing!')
+                            
+                            rt_plan_arn = event_detail.get('restoreTestingPlanArn')
+                            if not rt_plan_arn:
+                                logger.info(f'Response NOT part of restore testing (RT) feature. Validating whether its an RT Simulation Job : {restore_job_id}.')
+                                #Look for awsb:rt-simulator:restore-job-id
+                                restore_job_id_from_tag = tag_list.get('awsb:rt-simulator:restore-job-id')
+                                if restore_job_id_from_tag:
+                                    if restore_job_id_from_tag == restore_job_id:
+                                        rt_plan_arn=f'rt-simulation-{restore_job_id}'
+                                        #Remove the tag from the RP
+                                        backup_client.untag_resource(ResourceArn=recovery_point_arn,TagKeyList=['awsb:rt-simulator:restore-job-id'])
+                                        logger.info(f'Removed awsb:rt-simulator:restore-job-id from RP : {recovery_point_arn}')
+                                    else:
+                                        logger.warn(f'Response :{restore_job_id_from_tag} NOT part of the active Restore Job :{restore_job_id}. Skipping Elastio Workflow.')
+                                        return                                        
+                                else:
+                                    logger.warn('Response NOT part of restore testing (RT) feature NOR RT Simulation. Skipping Elastio Workflow.')
+                                    return
+
+                            #invoke the lambda
+                            input_params = {
+                                                "aws_backup_vault": backup_vault_name,
+                                                "aws_backup_rp_arn": recovery_point_arn,
+                                                "elastio_vault": ELASTIO_DEFAULT_VAULT_NAME,
+                                                "iscan": {
+                                                            "ransomware": True,
+                                                            "malware": True,
+                                                            "entropy": False,
+                                                            "send_event": True,
+                                                            "event_bridge_bus": elastio_status_eb,
+                                                            "user_data": f'{rt_plan_arn},{restore_job_id},{recovery_point_arn},{created_resource_arn}'
+                                                        }
+                                            }     
+                    
+                            if resource_type in ('EFS'):
+                                restored_resource_id = get_efs_resource_id(created_resource_arn)
+                                prep_for_efs_restore_test(restored_resource_id)
+                            elif resource_type in ('S3'):
+                                if ':::' in created_resource_arn:
+                                    restored_resource_id = created_resource_arn.split(':::')[1]
+                                    logger.info('S3 does NOT support Ransomware Scanning. Setting ransomware to False')
+                                input_params["iscan"]["ransomware"] = False
+                            elif resource_type == SUPPORTED_TYPE_FOR_SIMULATION:
+                                #Handle tagging the created resource arn ebs volumes with appropriate tags
+                                response = backup_client.get_recovery_point_restore_metadata(BackupVaultName=backup_vault_name,RecoveryPointArn=recovery_point_arn)
+                                restore_meta_data = response.get('RestoreMetadata')
+                                vm_disk_meta_data = restore_meta_data.get('disks')
+                                if vm_disk_meta_data:
+                                    restored_resource_id = created_resource_arn                          
+                                    #Handle EBS/ EC2
+                                    if -1 != created_resource_arn.find("/"):
+                                        # Handle for EC2 and EBS
+                                        restored_resource_id = created_resource_arn.split("/")[1]                           
+                                        tag_ebs_volumes_with_vm_disk_meta_data(restored_resource_id,restore_job_id,vm_disk_meta_data)
+                                    else:
+                                        raise ValueError(f"Invalid ARN format for {created_resource_arn}")
+
+                            else:
+                                restored_resource_id = created_resource_arn                          
+                                #Handle EBS/ EC2
+                                if -1 != created_resource_arn.find("/"):
+                                    # Handle for EC2 and EBS
+                                    restored_resource_id = created_resource_arn.split("/")[1]                            
+                                logger.info(f'Handling Resource Type : {resource_type} via the old route')    
+                            
+                            logger.info(f'Processing restored_resource_id :{restored_resource_id}')
+                            #invoke the lambda
+                            input_params["restored_resource_id"] = restored_resource_id                   
+
+                            # Let the customer control whether we do a scan-only, ingest, or ingest-and-scan 
+                            # of this RP.  If no `elastio:restore-test` tag is specified, we'll let the Elastio
+                            # integration Lambda decide what the default behavior should be.    
+                            #
+                            # the odd for loop is needed because we want this tag to be case-insensitive to maximum
+                            # customer convenience.
+                            elastio_action = None
+                            for tag in tag_list.keys():  # Iterate over the keys in tag_list
+                                if tag.lower() == ENABLE_ELASTIO_SCAN_TAG:  # Case-insensitive comparison
+                                    elastio_action = tag_list[tag].lower()  # Convert the value to lower case
+                                    break  # Exit the loop once the tag is found
+                            
+                            if elastio_action:
+                                if elastio_action not in ["scan", "ingest", "ingest-and-scan"]:
+                                    logger.warning(f'Invalid action "{elastio_action}" specified for RP {recovery_point_arn}. Defaulting to "scan".')
+                                    elastio_action = "scan"
+                                
+                                input_params['action'] = elastio_action
+                                logger.info(f'Action specified for RP {recovery_point_arn} is {elastio_action}')
+                            
+                            logger.info(f'invoking {elastio_lambda_arn} with {input_params}')
+                            try:
+                                response = boto3.client('lambda').invoke(
+                                    FunctionName=elastio_lambda_arn,
+                                    InvocationType='Event',
+                                    Payload=json.dumps(input_params)
+                                )
+                                logger.info(f'Invoked {elastio_lambda_arn} with {input_params} - response : {response}')
+
+                            except (ClientError, Exception):  # pylint: disable = W0703
+                                var = traceback.format_exc()
+                                logger.error(f"Error {var} processing invoke for elastio iscan lambda")    
+                        else:
+                            logger.info(f"Elastio scanning NOT enabled for RP via tag_list : {tag_list} and ENABLE_ELASTIO_SCAN_TAG :{ENABLE_ELASTIO_SCAN_TAG}")    
+
+
+                except Exception:
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} in handle_backup_event")
+
+            def tag_ebs_volumes_with_vm_disk_meta_data(instance_id, restore_job_id,new_tags):
+
+                try:
+                    new_tags = json.loads(new_tags)
+                    logger.info(f'tag_ebs_volumes_with_vm_disk_meta_data with {new_tags}')    
+                    ec2_client = boto3.client('ec2')
+
+                    # Describe the instance to get current tags
+                    response = ec2_client.describe_instances(InstanceIds=[instance_id])
+                    
+                    # Extract current tags
+                    current_tags = {}
+                    if 'Tags' in response['Reservations'][0]['Instances'][0]:
+                        current_tags = {tag['Key']: tag['Value'] for tag in response['Reservations'][0]['Instances'][0]['Tags']}
+
+                    ec2_tags = {'awsbackup-restore-test': restore_job_id}
+                    logger.info(f'New Tags to set for EC2: {ec2_tags}')    
+
+                    # Merge new tags with existing tags
+                    for key, value in ec2_tags.items():
+                        current_tags[key] = value
+                
+                    # Convert tags back to the format required by create_tags
+                    merged_tags = [{'Key': key, 'Value': value} for key, value in current_tags.items()]
+                    logger.info(f'Tags to set : {merged_tags}')
+                      
+                    
+                    # Update tags on the instance
+                    ec2_client.create_tags(Resources=[instance_id],Tags=merged_tags)
+
+                    response = ec2_client.describe_volumes(
+                        Filters=[{'Name': 'attachment.instance-id', 'Values': [instance_id]}]
+                    )
+                    volumes = response['Volumes']
+                    # Iterate over volumes and add new tags
+                    for idx, volume in enumerate(volumes):
+                        volume_id = volume['VolumeId']
+                        logger.info(f"Processing volume: {volume_id} at index {idx}")
+
+                        # Append index to each tag key
+                        tag_to_set = new_tags[idx]
+                        logger.info(f'tag_to_set for {volume_id} is {tag_to_set}')
+                        new_tags_to_set = {'awsb:disk-id': tag_to_set['diskId'],'awsb:disk-label': tag_to_set['label']}
+                        logger.info(f'New Tags : {new_tags_to_set}')
+
+                        # Get the current tags of the volume
+                        response = ec2_client.describe_tags(
+                            Filters=[{'Name': 'resource-id', 'Values': [volume_id]}]
+                        )
+                        
+                        # Extract existing tags
+                        existing_tags = {tag['Key']: tag['Value'] for tag in response['Tags']}
+                    
+                        # Merge new tags with existing tags
+                        for key, value in new_tags_to_set.items():
+                            existing_tags[key] = value
+                    
+                        # Convert tags back to the format required by create_tags
+                        merged_tags = [{'Key': key, 'Value': value} for key, value in existing_tags.items()]
+                        logger.info(f'Tags to set : {merged_tags}')
+
+                        # Apply the updated tags to the volume
+                        ec2_client.create_tags(
+                            Resources=[volume_id],
+                            Tags=merged_tags
+                        )
+                except Exception:
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} in tag_ebs_volumes_with_vm_disk_meta_data")
+
+
+            def save_event_data_to_s3(s3_log_bucket,json_content):
+                """
+                This method is responsible for writing the json_content to the s3_log_bucket
+                """
+                try:
+                    job_id = json_content.get('job_id') 
+                    s3_log_location = 'elastio-scan-results/' + job_id + '.json'        
+                    logger.info(f"Persisting event data to : {s3_log_bucket} at {s3_log_location}")
+                    s3_client = boto3.client('s3')
+                    s3_client.put_object(Body=json.dumps(json_content,
+                                                    default=str, separators=(',', ':')),
+                                    Bucket=s3_log_bucket,
+                                    Key=s3_log_location, ACL='bucket-owner-full-control',
+                                    Tagging='Source=ElastioResults')
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} processing save_event_data_to_s3") 
+                
+            def process_ransomware_details(account_id,product_arn,generator_id,scan_timestamp,aws_asset_id,aws_backup_rp_arn,elastio_rp_id,ransomware_details):
+                """
+                This is the function responsible to create ransomware findings based on ransomware_details
+                """      
+                try:
+                    logger.info('Starting process_ransomware_details')
+                    title = 'Ransomware scan results'
+                    ransomware_report = ransomware_details['report']
+                    if ransomware_report:
+                        ransomware_encrypted_files = ransomware_report.get('encrypted_files')
+                        if ransomware_encrypted_files:
+                            ransomware_state = 'OBSERVED'
+                            for ransomware_encrypted_file in ransomware_encrypted_files:
+                                parent_directory = ransomware_encrypted_file.get('parent_directory')
+                                filename = ransomware_encrypted_file.get('filename')
+                                file_path = f'{parent_directory}/{filename}'
+                                suspected_ransomware = ransomware_encrypted_file.get('suspected_ransomware')
+                                suspected_ransomware_names = [suspected_ransomware_item['name'] for suspected_ransomware_item in suspected_ransomware]
+                                
+                                # Convert the list of names into a comma-separated string
+                                suspected_ransomware_names = ', '.join(suspected_ransomware_names)
+                                scan_result_type = 'RANSOMWARE'
+                                
+                                ransomware_obj = { 
+                                                'Name': suspected_ransomware_names,
+                                                'Path': file_path,
+                                                'State': ransomware_state,
+                                                'Type': scan_result_type
+                                            }
+                                import_security_hub_findings(account_id,product_arn,generator_id,scan_timestamp,title,aws_asset_id,aws_backup_rp_arn,elastio_rp_id,ransomware_obj)
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} processing process_ransomware_details")
+                
+                    
+            def process_malware_details(account_id,product_arn,generator_id,scan_timestamp,aws_asset_id,aws_backup_rp_arn,elastio_rp_id,malware_details):
+                """
+                This is the function responsible to create malware findings based on malware_details
+                """        
+                try:
+                    logger.info('Starting process_malware_details')
+                    title = 'Malware scan results'
+                    malware_report = malware_details['report']
+                    if malware_report:
+                        malware_suspicious_files = malware_report.get('suspicious_files')
+                        if malware_suspicious_files:
+                            malware_state = 'OBSERVED'
+                            for malware_suspicious_file in malware_suspicious_files:
+                                file_path = malware_suspicious_file.get('path')
+                                scan_result = malware_suspicious_file.get('scan_result')
+                                malware_name = 'EncryptedFile'
+                                scan_result_type = 'BLENDED_THREAT' 
+                                if isinstance(scan_result, dict):
+                                    infected_data = scan_result.get('Infected')
+                                    if infected_data:
+                                        scan_result_type =  infected_data.get('threat_type')
+                                        if scan_result_type and scan_result_type == 'Virus':
+                                            scan_result_type = 'VIRUS'
+                                        malware_name = infected_data.get('threat_name')
+                                malware_obj = { 
+                                                'Name': malware_name,
+                                                'Path': file_path,
+                                                'State': malware_state,
+                                                'Type': scan_result_type
+                                            }
+                                
+                                import_security_hub_findings(account_id,product_arn,generator_id,scan_timestamp,title,aws_asset_id,aws_backup_rp_arn,elastio_rp_id,malware_obj)
+                                
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} processing process_malware_details")      
+                
+
+            def update_rp_validation_status(event):
+                """
+                This is the main function that will process the elastio response JSON to update RT Status
+                """ 
+                try:
+                    logger.info('Starting update_rp_validation_status')
+                    event_details = event['detail']
+                    elastio_scan_reports = event_details.get('reports')
+                    
+                    for elastio_report in elastio_scan_reports:
+                        logger.info(f'Processing elastio_report : {elastio_report}')
+                        scan_summary = elastio_report.get('summary')
+                        user_data = elastio_report.get('user_data')
+                        rt_plan_arn = None
+                        restore_job_id = None
+                        if user_data:
+                            logger.info(f'user_data : {user_data}')
+                            user_data_list = user_data.split(',')
+                            if len(user_data_list) > 1:
+                                rt_plan_arn = user_data_list[0]
+                                restore_job_id = user_data_list[1]
+
+                        aws_asset_id = scan_summary.get('aws_asset_id')
+                        
+
+                        is_rp_clean = scan_summary.get('clean')
+                        summary_details = elastio_report.get('summary')
+                        status_message = 'Recovery point is clean of Malware and Ransomware infection.'
+                        status = 'SUCCESSFUL'
+
+                        if summary_details:
+                            if not is_rp_clean:
+                                status = 'FAILED'
+                                ransomware_files_detected = summary_details.get("ransomware_files_detected")                    
+                                malware_files_detected = summary_details.get("malware_files_detected")
+                                status_message = f'Recovery point is compromised with {malware_files_detected} Malware and {ransomware_files_detected} Ransomware infection(s).'                    
+
+                        #Update RP Status
+                        try:
+                            logger.info(f'attempting update_rt_job_status for restore_job_id :{restore_job_id}, rt_plan_arn :{rt_plan_arn},aws_asset_id :{aws_asset_id}, status : {status}, status_message :{status_message} ')
+                            update_rt_job_status(restore_job_id,rt_plan_arn,status,status_message)
+                            
+                        except (ClientError, Exception):
+                            var = traceback.format_exc()
+                            logger.error(f"Error {var} processing update_rt_job_status")            
+                        
+
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} processing update_rp_validation_status")   
+
+
+            def generate_security_hub_findings(event):
+                """
+                This is the main function that will process the elastio response JSON to create
+                SecurityHub findings
+                """ 
+                try:
+                    logger.info('Starting generate_security_hub_findings')
+                    awsRegion = event['region']
+                    account_id = event['account']
+                    generator_id = f"{account_id}/elastio.iscan/{event.get('job_id')}"
+                    product_arn = 'arn:aws:securityhub:' + awsRegion + ':' + account_id + ':product/' + account_id + '/default'    
+                    event_details = event['detail']
+                    scan_timestamp = event['time']
+                    elastio_scan_reports = event_details.get('reports')
+                    for elastio_report in elastio_scan_reports:
+                        scan_summary = elastio_report.get('summary')
+                        aws_backup_rp_arn = elastio_report.get('aws_backup_rp_arn')
+                        aws_asset_id = scan_summary.get('aws_asset_id')
+
+                        # When scanning an Elastio RP, this is a string with the RP ID and the Elastio asset ID separated by `:`, eg
+                        # rp-01hb8zhddexp111v2wf6zqnx6s:elastio:asset:aws-ebs:s:968455818835:us-east-2:vol-09678ed07cb34fb40
+                        #
+                        # When performing scan-only on an AWS Backup RP, the format is $aws_rp_arn:$snapshot_id, eg:
+                        # aws:ec2:us-east-2::snapshot/snap-09205755f3e7984c7:snap-09205755f3e7984c7
+                        #
+                        # Since we already know the backup ARN from a dedicated report field, and don't actually care about
+                        # the individual EBS snapshot that was scanned, we'll ignore the cases where there is no RP ID for the
+                        # purposes of generating a SecurityHub alert.
+                        elastio_asset = elastio_report.get('asset')
+                        
+                        if elastio_asset.startswith("rp-") and ":" in elastio_asset:
+                            elastio_rp_id = elastio_asset.split(":", 1)[0]  # split at the first occurrence of ":" and return the first part
+                        else:
+                            elastio_rp_id = None
+
+                        is_rp_clean = scan_summary.get('clean')
+                        malware_details = elastio_report.get('malware')
+                        ransomware_details = elastio_report.get('ransomware')
+                        summary_details = elastio_report.get('summary')
+                        user_data = elastio_report.get('user_data')
+                        aws_backup_vault_name = None
+                        enable_rp_fwd = False
+                        if user_data:
+                            user_data = user_data.strip()
+                            user_data_list = user_data.split(',')
+                            logger.info(f'user_data : {user_data}')
+                            if len(user_data_list) > 1:
+                                aws_backup_vault_name=user_data_list[0]
+                                enable_rp_fwd=bool(user_data_list[1])            
+                        if not is_rp_clean:
+                            process_malware_details(account_id,product_arn,generator_id,scan_timestamp,aws_asset_id,aws_backup_rp_arn,elastio_rp_id, malware_details)
+                            process_ransomware_details(account_id,product_arn,generator_id,scan_timestamp,aws_asset_id,aws_backup_rp_arn,elastio_rp_id, ransomware_details)
+                            create_summary_insights(aws_backup_rp_arn,summary_details)
+                        else:
+                            if enable_rp_fwd:
+                                #Forward the original recovery point to a safe vault once the scan is clean
+                                if aws_backup_vault_name and AWSB_COPY_IAM_ROLE and ELASTIO_SCAN_AFTER_COPY_DESTINATION:
+                                    forward_recovery_point_to_vault(aws_backup_vault_name,aws_backup_rp_arn)
+                                else:
+                                    logger.error('AWS Backup Vault name is missing in Elastio User Data. Skipping copy Recovery Point.')
+                            else:
+                                logger.info(f'AWS Backup RP : {aws_backup_rp_arn} is NOT marked for Forwarding. Skipping Copy')                
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} processing generate_security_hub_findings")   
+
+            def forward_recovery_point_to_vault(aws_backup_vault_name,aws_backup_rp_arn):
+                """
+                This function is responsible for copy the clean AWS Backup RP to the user defined vault
+                """      
+                try:
+                    
+                    backup_client = boto3.client('backup')
+                    logger.info(f'Copying clean Recovery Point : {aws_backup_rp_arn} from {aws_backup_vault_name} to {ELASTIO_SCAN_AFTER_COPY_DESTINATION} using role : {AWSB_COPY_IAM_ROLE}')
+                    response = backup_client.start_copy_job(
+                        RecoveryPointArn=aws_backup_rp_arn,
+                        SourceBackupVaultName=aws_backup_vault_name,
+                        DestinationBackupVaultArn=ELASTIO_SCAN_AFTER_COPY_DESTINATION,
+                        IamRoleArn=AWSB_COPY_IAM_ROLE)
+                    logger.info(f'start_copy_job done : {response}')    
+
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} processing forward_recovery_point_to_vault")        
+                    
+            def import_security_hub_findings(account_id,product_arn,generator_id,scan_timestamp,title,aws_asset_id,aws_backup_rp_arn,elastio_rp_id,malware_obj):   
+                """
+                This function is responsible for creating a finding in SecurityHub based on malware_obj
+                """        
+                try:
+                    logger.info('Starting import_security_hub_findings')
+                    finding_id = f"{account_id}/{uuid.uuid4()}"
+                    description = f'Details of {title} for AWS Backup Recovery Point : {aws_backup_rp_arn}'
+                    sechub_finding = {
+                                'SchemaVersion': '2018-10-08', 
+                                'Id': finding_id,
+                                'ProductArn': product_arn,
+                                'GeneratorId': generator_id,
+                                'AwsAccountId': account_id,
+                                'Types': [ 'Malware and Ransomware Scans' ],
+                                'FirstObservedAt': scan_timestamp,
+                                'UpdatedAt': scan_timestamp,
+                                'CreatedAt': scan_timestamp,
+                                'Severity': {
+                                'Label': "HIGH"
+                                },
+                                'Title': title,
+                                'Description': description,
+                                'ProductName':'Elastio iScan',
+                                'CompanyName':'Elastio',
+                                'WorkflowState': 'NEW', 
+                                'Compliance': {'Status': 'FAILED'},                    
+                                'Resources': [
+                                {
+                                    'Id': aws_asset_id,
+                                    'Type': "VolumeId"
+                                },
+                                {
+                                    'Id': aws_backup_rp_arn,
+                                    'Type': "RecoveryPointId"
+                                },
+                                ],
+                                'Malware': [malware_obj]
+                            }
+                    
+                    # Some customers only look at SecurityHub, they don't have the optional observability
+                    # component enabled, so for now the only notice they will get of an adverse finding on the AWS Backup RP
+                    # will be via SecurityHub.  So it's important that we include the Elastio RP ID so they are able to find
+                    # it in the UI.
+                    if elastio_rp_id is not None:
+                        sechub_finding['Resources'].append({
+                            'Id': elastio_rp_id,  
+
+                            # Per the AWS Security Hub Security Finding Format (https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-findings-format-syntax.html)
+                            # non-AWS IDs must have type "Other"
+                            'Type': 'Other'
+                        })
+
+                    logger.info(f'batch_import_findings with finding : {sechub_finding}')
+                    response = sechub_client.batch_import_findings(Findings=[sechub_finding])
+                    successCount=response['SuccessCount']
+                    failedCount=response['FailedCount']
+                    failedFindings=response['FailedFindings']
+                    
+                    logger.info(f'batch_import_findings finished. FailedCount: {failedCount},SuccessCount : {successCount}. FailedFindings: {failedFindings}')
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} processing import_security_hub_findings") 
+
+            def create_summary_insights(awsbackup_rp_id, summary_details):
+                """
+                This function is responsible to create an insight based on the findings
+                created for the awsbackup_rp_id
+                """    
+                
+                try:
+                    logger.info(f'Starting create_summary_insights with {summary_details}')
+                    aws_asset_id = summary_details.get('aws_asset_id')
+                    insight_name = f'Elastio Scan results for resource : {aws_asset_id} using RP : {awsbackup_rp_id}'
+                    if len(insight_name) > 128:
+                        insight_name = insight_name[:125] + '...'
+                    filters = {
+                        'ResourceId': [{
+                            'Value': awsbackup_rp_id,
+                            'Comparison': 'EQUALS'
+                        }],
+                        'ResourceType': [{
+                            'Value': 'RecoveryPointId',
+                            'Comparison': 'EQUALS'
+                        }],
+                        'CompanyName': [{
+                            'Value': 'elastio.com',
+                            'Comparison': 'EQUALS'
+                        }],
+                        'WorkflowStatus': [{
+                            'Value': 'NEW',
+                            'Comparison': 'EQUALS'
+                        }]
+                    }    
+                    
+                    group_by_attribute = 'ResourceType'     
+                    logger.info(f'create_insight :{insight_name} with filter : {filters} and group_by_attribute : {group_by_attribute}')
+                    
+                    response = sechub_client.create_insight(
+                        Name=insight_name,
+                        Filters=filters,
+                        GroupByAttribute=group_by_attribute
+                    )
+                    insight_arn = response['InsightArn']
+                    logger.info(f'Insight : {insight_arn} created successfully')
+                    
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} processing create_summary_insights")    
+
+            def send_event_to_global_event_bus(event_type, json_content):
+                
+                global_event_bus_arn = os.environ.get("AWSBackupEventsBusArn")
+                if global_event_bus_arn:
+                    try:
+                        events_client = boto3.client("events")
+                        json_payload = json.dumps(
+                            json_content, default=str, separators=(",", ":")
+                        )
+                        # info(f"Sending event data to : {self.global_event_bus_arn} under : {event_type}, json_content : {json_payload}")
+                        response = events_client.put_events(
+                            Entries=[
+                                {
+                                    "Time": datetime.datetime.now(timezone.utc),
+                                    "Source": "observer.events",
+                                    "DetailType": event_type,
+                                    "Detail": json_payload,
+                                    "EventBusName": global_event_bus_arn,
+                                }
+                            ]
+                        )
+                        failed_entry_count = response['FailedEntryCount']
+                        logger.info(f"put_events response failed_entry_count : {failed_entry_count}")
+                    except (ClientError, Exception):
+                        var = traceback.format_exc()
+                        logger.error(
+                            f"Error {var} processing put_events in send_event_to_global_event_bus"
+                        )        
+                
+            def handle_elastio_iscan_event(scan_event_data):
+                logger.info(
+                    f"Handling event for elastio.iscan events, payload :{scan_event_data}"
+                )
+
+                try:
+                    # Log the Combined Event
+                    job_event_type = "scan_results"
+                    scan_event_data["job_type"] = job_event_type
+                    enable_observer_integration = os.environ.get('EnableObserverIntegration')
+                    scan_event_data['job_id']=scan_event_data.get('id')
+                    if enable_observer_integration.lower() in ['true', '1', 't', 'y','yes']:            
+                        #Check if Observer Integration exists, if so sent results to Observer
+                        send_event_to_global_event_bus(job_event_type, scan_event_data)
+
+                    s3_log_bucket = os.environ.get('LogsBucketName') 
+                    if s3_log_bucket:
+                        save_event_data_to_s3(s3_log_bucket,scan_event_data)
+                    else:
+                        logger.info('S3 Log Bucket Name Env Parameter LogsBucketName is missing. Skipping logging to S3 Bucket')
+                    event_details = scan_event_data['detail']
+                    elastio_scan_reports = event_details.get('reports')
+                    if elastio_scan_reports:
+                        enable_sechub_integration = os.environ.get('EnableSHIntegration')
+                        if not enable_sechub_integration:
+                            enable_sechub_integration = 'True' 
+
+                        if enable_sechub_integration.lower() in ['true', '1', 't', 'y','yes']:
+                            #Generate SH Findings
+                            generate_security_hub_findings(scan_event_data)               
+                        
+                        #update the RP Validation Status
+                        update_rp_validation_status(scan_event_data)
+                    else:
+                        user_data = event_details.get('user_data')
+                        rt_plan_arn = None
+                        restore_job_id = None
+                        created_resource_arn = None
+                        aws_backup_rp_arn = None
+                        #"user_data": f'{rt_plan_arn},{restore_job_id},{aws_backup_rp_arn},{created_resource_arn}'
+                        if user_data:
+                            logger.info(f'user_data : {user_data}')
+                            user_data_list = user_data.split(',')
+                            if len(user_data_list) > 1:
+                                rt_plan_arn = user_data_list[0]
+                                restore_job_id = user_data_list[1] 
+                            if len(user_data_list) > 2:
+                                aws_backup_rp_arn = user_data_list[2]                                   
+                            if len(user_data_list) > 3:
+                                created_resource_arn = user_data_list[3]                                            
+                        status_message = event_details.get('error_message') 
+                        logger.error(f'Elastio scan failed for {rt_plan_arn} :{restore_job_id} with error : {status_message} ')
+                        status = 'FAILED'
+                        if restore_job_id:
+                            update_rt_job_status(restore_job_id,rt_plan_arn,status,status_message)
+
+                        if created_resource_arn and rt_plan_arn:
+                            if rt_plan_arn.startswith('rt-simulation'):
+                                restored_resource_id = created_resource_arn.split("/")[1]
+                                terminate_restore_tested_instance(restored_resource_id)
+                except Exception as e:
+                    logger.error(
+                        f"Error : {e} processing handle_elastio_iscan_event"
+                    )
+
+            def terminate_restore_tested_instance(instance_id):
+                ec2_client = boto3.client('ec2')
+
+                try:
+                    response = ec2_client.terminate_instances(
+                        InstanceIds=[instance_id]
+                    )
+                    logger.info(f"Termination initiated for instance {instance_id}. Current state: {response['TerminatingInstances'][0]['CurrentState']['Name']}")
+                except Exception as e:
+                    logger.error(f"Error terminating instance {instance_id}: {str(e)}")
+
+            def update_rt_job_status(restore_job_id,rt_plan_arn,status,status_message):
+                logger.info(f'Updating status for {rt_plan_arn} :{restore_job_id} with status : {status} and  message : {status_message} ')
+                if len(status_message) > RT_STATUS_MESSAGE_MAX_LENGTH:
+                    status_message=status_message[:RT_STATUS_MESSAGE_MAX_LENGTH]
+                    
+                backup_client = boto3.client('backup')
+                backup_client.put_restore_validation_result(RestoreJobId = restore_job_id,
+                                                            ValidationStatus = status, 
+                                                            ValidationStatusMessage = status_message )
+                logger.info(f'Updated status {restore_job_id} with status : {status}')    
+
+            def lambda_handler(event, context):
+                """
+                Main Handler for Elastio Restore Simulator
+                """
+                logger.info(f'Processing Event : {event}, context : {context}')
+                try:
+                    event_source = event.get("source")
+                    #Process AWS Restore Job completion event to trigger Elastio Scan
+                    if event_source == 'aws.backup':
+                        handle_backup_event(event)
+                    elif event_source == 'aws.ec2':
+                        detail_type = event.get("detail-type")
+                        event_detail = event.get("detail")
+                        job_event_state = event_detail.get("state")
+                        if detail_type == "EC2 AMI State Change":
+                            resources = event.get('resources')
+                            if not job_event_state:
+                                # Hack
+                                job_event_state = event_detail.get("status")        
+                            recovery_point_arn = None
+                            for resource in resources:
+                                if ':backup-vault:' not in resource:
+                                    recovery_point_arn = resource
+                            #https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/monitor-ami-events.html#ami-event-available
+                            ec2_image_id = event_detail.get('ImageId')
+                            logger.info(f'Handling EC2 AMI State Change event for :{job_event_state} and {detail_type} for EC2 AMI Id:{ec2_image_id}') 
+                            #TODO Check if this AMI was created by AWSB using the AWS Backup API describe_recovery_point and handle ResourceNotFoundException
+                            aws_backup_vault_name = find_aws_backup_vault_name(recovery_point_arn)
+                            if not aws_backup_vault_name:
+                                logger.info(f'Handling non AWS Backup created AMI : {recovery_point_arn}')
+                                tag_recovery_point_with_meta_data('EC2',recovery_point_arn)
+                    elif event_source == 'elastio.iscan':
+                        handle_elastio_iscan_event(event)          
+
+                except (ClientError, Exception):
+                    var = traceback.format_exc()
+                    logger.error(f"Error {var} processing handler")
+
+
+  EC2AMICreationEventRule:
+    Type: 'AWS::Events::Rule'
+    Properties: 
+      Description: 'Rule to direct EC2 AMI creation Events to ElastioRTSimulator Lambda'
+      EventPattern: 
+        source: 
+          - 'aws.ec2'
+        detail-type: 
+          - 'EC2 AMI State Change'
+        detail: 
+          State: 
+            - 'available'
+      Targets: 
+        - Arn: !GetAtt "ElastioRTSimulatorLambda.Arn"
+          Id: "ProcessEC2AMIStateChangeUsingLambda" 
+
+  EC2AMICreationEventRuleInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !Ref ElastioRTSimulatorLambda
+      Action: 'lambda:InvokeFunction'
+      Principal: 'events.amazonaws.com'
+      SourceArn: !GetAtt EC2AMICreationEventRule.Arn
+
+  ProcessAWSBEventForElastioRTSimulator: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Name: ProcessAWSBEventForElastioRTSimulator
+      Description: "Rule to direct AWS Backup Events events to ElastioRTSimulator Lambda"
+      State: "ENABLED"
+      EventPattern: 
+        source:
+          - 'aws.backup'
+        detail-type:
+          - 'Recovery Point State Change'
+          - 'Restore Job State Change'     
+        detail:
+          status:
+            - COMPLETED               
+      Targets: 
+        - Arn: !GetAtt "ElastioRTSimulatorLambda.Arn"
+          Id: "ProcessAWSBackupEventsUsingLambda" 
+          
+  ProcessAWSBEventForElastioRTSimulatorInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref ElastioRTSimulatorLambda
+      Principal: events.amazonaws.com
+      SourceArn: !Sub ${ProcessAWSBEventForElastioRTSimulator.Arn}
+
+  ElastioRTSimulatorEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Join [ '', ['ElastioRTSimulatorEventBus-', !Ref 'AWS::AccountId','-', !Ref 'AWS::Region'] ]
+      Tags:
+        - Key: !Ref ElastioTagKey
+          Value: !Ref ElastioTagValue
+
+  ElastioStatusEventBridgeInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref ElastioRTSimulatorLambda
+      Principal: events.amazonaws.com
+      SourceArn: !Sub ${ElastioStatusEventRuleForRTSimulator.Arn}    
+  
+  ElastioStatusEventRuleForRTSimulator: 
+    Type: AWS::Events::Rule
+    Properties: 
+      Description: "EventBridge rule to send Elastio events to ElastioRTSimulator Lambda"
+      EventBusName: !Ref ElastioRTSimulatorEventBus
+      State: "ENABLED"
+      EventPattern: 
+        source:
+          - 'elastio.iscan'
+      Targets: 
+        - Arn: !GetAtt ElastioRTSimulatorLambda.Arn
+          Id: "ElastioStatusEvent"
+  
+  ElastioRTSimulatorEventBusPolicy:
+    Type: AWS::Events::EventBusPolicy
+    Properties: 
+        EventBusName: !Ref ElastioRTSimulatorEventBus
+        StatementId: "ElastioRTSimulatorEventBusPolicyStmt"
+        Statement: 
+            Effect: "Allow"
+            Principal: "*"
+            Action: "events:PutEvents"
+            Resource: !GetAtt "ElastioRTSimulatorEventBus.Arn"
+
+  #TODO Move this to another stack and deploy it on demand
+  ElastioRTSimulatorLambdaRole:
+    Type: 'AWS::IAM::Role'
+    Metadata:    
+      cfn_nag:
+        rules_to_suppress:
+          - id: F3
+          - id: W11
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      RoleName: 'ElastioRTSimulatorLambdaRole'
+      Description: 'IAM Role to allow permissions for the AWS Backup Restore Testing Simulator'            
+      ManagedPolicyArns:
+          - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+      Policies:        
+          - PolicyName: invokeAndPassRoleForLambda
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+              - Effect: Allow
+                Action:
+                - lambda:InvokeFunction
+                Resource: '*'     
+              - Effect: Allow
+                Action:
+                - iam:PassRole
+                Resource: '*'                       
+          - PolicyName: s3Permissions
+            PolicyDocument:
+              Statement:
+              - Effect: Allow
+                Action:
+                  - kms:GenerateDataKey
+                  - kms:Decrypt
+                  - kms:Encrypt                  
+                  - s3:PutObject*
+                  - s3:GetObject*
+                  - s3:DeleteObject
+                  - s3:*BucketNotification
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:ListMultipartUploadParts
+                  - s3:AbortMultipartUpload                  
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:s3:::${LogsBucketName}/*'
+                  - !Sub 'arn:${AWS::Partition}:s3:::${LogsBucketName}'
+          - PolicyName: logStreamPermissions
+            PolicyDocument:
+              Statement:                       
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:${AWS::Partition}:logs:*:*:*'   
+          - PolicyName: backupPermissions
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+              - Effect: Allow
+                Action:
+                - backup:ListTags
+                - backup:TagResource
+                - backup:UntagResource
+                - backup:DescribeRecoveryPoint                
+                - backup:DescribeRecoveryPoint
+                - backup:GetRecoveryPointRestoreMetadata     
+                - backup:StartRestoreJob
+                - backup:DescribeRestoreJob
+                - backup:ListBackupVaults 
+                - backup:ListRecoveryPointsByBackupVault
+                - backup:PutRestoreValidationResult
+                Resource: '*'      
+          - PolicyName: ec2Permissions
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+              - Effect: Allow
+                Action:
+                - ec2:DescribeImages
+                - ec2:DescribeVolumes
+                - ec2:DescribeInstances
+                - ec2:DescribeSnapshots
+                - ec2:CreateSecurityGroup
+                - ec2:AuthorizeSecurityGroupIngress
+                - ec2:DescribeSecurityGroups
+                - ec2:DescribeVpcs
+                - ec2:DescribeSubnets
+                - ec2:DescribeTags
+                - ec2:CreateTags
+                - ec2:TerminateInstances
+                Resource: '*'          
+          - PolicyName: secHubPermissions
+            PolicyDocument:
+              Statement:                       
+              - Effect: Allow
+                Action:
+                  - 'securityhub:BatchImportFindings'
+                  - 'securityhub:CreateInsight'
+                Resource: 
+                  - !Sub 'arn:${AWS::Partition}:securityhub:*:${AWS::AccountId}:product/*/*'
+                  - !Sub 'arn:${AWS::Partition}:securityhub:*:${AWS::AccountId}:hub/default'        
+Outputs:
+  StackName:
+    Value: !Ref AWS::StackName                  

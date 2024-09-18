@@ -79,6 +79,13 @@ Elastio Connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
     // of many applications, and thus doesn't immediately imply a ransomware attack.
     "entropy": false,
 
+    // Optional. Enables filesystem corruption checks scan.
+    // If omitted then fs check is disabled.
+    // Currently it is available for:
+    // - EBS volumes
+    // - EC2 instances
+    "fs_check": false,
+
     // Name of the AWS EventBridge event bus scan reports will be written to.
     //
     // Optional. If omitted, the value will be read from an SSM parameter named

@@ -64,6 +64,6 @@ module "elastio" {
 
   # This input is optional. Here you can specify the version of the NAT provisioning stack.
   # If you don't need it, just omit this input variable.
-  elastio_nat_provision_stack = "v4"
+  elastio_nat_provision_stack = "v5"
 }
 ```

@@ -36,6 +36,7 @@ locals {
     iamResourceNamesSuffix            = var.iam_resource_names_suffix
     iamResourceNamesStatic            = var.iam_resource_names_static
     disableCustomerManagedIamPolicies = var.disable_customer_managed_iam_policies
+    disableServiceLinkedRolesCreation = var.service_linked_roles == "tf"
     supportRoleExpirationDate         = var.support_role_expiration_date
     tenantRoleArn                     = "arn:aws:iam::176355207749:role/vkryvenko.development.elastio.us"
   }
@@ -73,9 +74,38 @@ locals {
     key => tostring(value)
     if value != null
   }
+
+  service_linked_roles_services = [
+    "ecs.amazonaws.com",
+    "batch.amazonaws.com",
+    "spot.amazonaws.com",
+    "spotfleet.amazonaws.com",
+    "ecs.application-autoscaling.amazonaws.com",
+    "autoscaling.amazonaws.com",
+  ]
 }
 
+resource "terraform_data" "service_linked_roles" {
+  for_each = var.service_linked_roles == "tf" ? local.service_linked_roles_services : toset([])
+
+  input = each.value
+  triggers_replace = each.value
+
+  provisioner "local-exec" {
+    command = <<CMD
+      aws iam create-service-linked-role --aws-service-name $service_name || true
+    CMD
+
+    environment = {
+      service_name = self.input
+    }
+  }
+}
+
+
 resource "aws_cloudformation_stack" "elastio_account_level_stack" {
+  depends_on = [terraform_data.service_linked_roles]
+
   name         = "elastio-account-level-stack"
   template_url = data.http.cloudformation_template.response_body
   tags = {

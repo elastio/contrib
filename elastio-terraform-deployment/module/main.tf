@@ -85,6 +85,10 @@ locals {
   ]
 }
 
+# We have to use the `terraform_data` resource for the service-linked roles
+# because their creation needs to be idempotent and terraform shouldn't claim
+# ownership of them. These roles may already exist in the account, and they
+# may be used by other resources not managed by Elastio.
 resource "terraform_data" "service_linked_roles" {
   for_each = var.service_linked_roles == "tf" ? local.service_linked_roles_services : toset([])
 

@@ -40,7 +40,7 @@ variable "elastio_cloud_connectors" {
 
 variable "elastio_nat_provision_stack" {
   description = <<DESCR
-    Specifies the version of Elastio NAT provision stack to deploy (e.g. `v4`).
+    Specifies the version of Elastio NAT provision stack to deploy (e.g. `v5`).
 
     This is a Cloudformation stack that automatically provisions NAT Gateways in
     your VPC when Elastio worker instances run to provide them with the outbound
@@ -147,6 +147,37 @@ variable "disable_customer_managed_iam_policies" {
 
   type    = bool
   default = null
+}
+
+variable "service_linked_roles" {
+  description = <<DESCR
+  By default the CFN stack creates the service-linked IAM roles needed by the stack.
+  Since these are global in your account, they can't be defined as regular resources
+  in the CFN, because these roles may already exist in your account and thus
+  the deployment would fail on a name conflict.
+
+  Instead, by default, they are deployed using an AWS::CloudFormation::CustomResource
+  which invokes an AWS Lambda function that creates the service-linked roles only if
+  they don't exist and doesn't fail if they do.
+
+  The default approach of creating the service-linked roles via the CFN requires
+  creating a lambda function in your environment that has IAM write permission of
+  `iam:CreateServiceLinkedRole`. If you can't afford creating such a lambda function
+  then set this parameter to `tf` and this terraform module will create the
+  service-linked roles without the need for a lambda function.
+
+  If you set this to `tf`, then make sure you have the AWS CLI installed and
+  configured with the necessary credentials on the machine where you run terraform.
+  DESCR
+
+  type     = string
+  default  = "cfn"
+  nullable = false
+
+  validation {
+    condition     = contains(["cfn", "tf"], var.service_linked_roles)
+    error_message = "service_linked_roles must be one of 'cfn', 'tf'"
+  }
 }
 
 variable "support_role_expiration_date" {

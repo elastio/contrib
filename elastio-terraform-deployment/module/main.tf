@@ -38,7 +38,6 @@ locals {
     disableCustomerManagedIamPolicies = var.disable_customer_managed_iam_policies
     disableServiceLinkedRolesCreation = var.service_linked_roles == "tf"
     supportRoleExpirationDate         = var.support_role_expiration_date
-    tenantRoleArn                     = "arn:aws:iam::176355207749:role/vkryvenko.development.elastio.us"
   }
 
   enriched_connectors = [

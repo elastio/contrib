@@ -33,6 +33,10 @@ be no route `0.0.0.0/0` configured in the route table of the private subnet.
 2. Check the box in front of `I acknowledge that AWS CloudFormation might create IAM resources`
     and click `Create stack`.
 
+## Deployer IAM role
+
+If you'd like to automate the deployment of the NAT Gateway Provision Lambda Cloudformation stack, then you can use the example IAM role and policies to assign to your deployer process IAM identity. The example is available at [`deployer/main.tf`](./deployer/main.tf).
+
 ## Updating the CFN stack
 
 To update the existing CFN stack use the Cloudformation UI or AWS CLI and pass the following CFN template link to replace the existing template:

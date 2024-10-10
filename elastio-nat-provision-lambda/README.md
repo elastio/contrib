@@ -43,3 +43,15 @@ To update the existing CFN stack use the Cloudformation UI or AWS CLI and pass t
 ```
 https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-nat-provision-lambda/v5/cloudformation-lambda.yaml
 ```
+
+## Contributing
+
+For anyone contributing to the code of the NAT Gateway Provision Lambda, make sure to test your changes against the deployer IAM role. Create the deployer IAM role and run the script [`deployer/test/test.sh`](./deployer/test/test.sh) to test that the role is capable of deploying the stack.
+
+```bash
+cd deployer
+terraform apply -auto-approve
+
+cd test
+./test.sh
+```

@@ -33,9 +33,27 @@ be no route `0.0.0.0/0` configured in the route table of the private subnet.
 2. Check the box in front of `I acknowledge that AWS CloudFormation might create IAM resources`
     and click `Create stack`.
 
+## Deployer IAM role
+
+If you'd like to automate the deployment of the NAT Gateway Provision Lambda Cloudformation stack, then you can use the example IAM role and policies to assign to your deployer process IAM identity. The example is available at [`deployer/main.tf`](./deployer/main.tf).
+
 ## Updating the CFN stack
 
-To update the existing CFN stack use the Cloudformation UI or AWS CLI and pass the following CFN template link to replace the existing template:
+To update the existing CFN stack, use the Cloudformation UI or AWS CLI and pass the following CFN template link to replace the existing template:
 ```
 https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-nat-provision-lambda/v5/cloudformation-lambda.yaml
+```
+
+## Contributing
+
+For anyone contributing to the code of the NAT Gateway Provision Lambda, make sure to test your changes against the deployer IAM role. Create the deployer IAM role and run the script [`deployer/test/test.sh`](./deployer/test/test.sh) to test that the role is capable of deploying the stack.
+
+```bash
+cd deployer
+terraform init
+terraform apply -auto-approve
+
+cd test
+terraform init
+./test.sh
 ```

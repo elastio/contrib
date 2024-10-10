@@ -39,7 +39,7 @@ If you'd like to automate the deployment of the NAT Gateway Provision Lambda Clo
 
 ## Updating the CFN stack
 
-To update the existing CFN stack use the Cloudformation UI or AWS CLI and pass the following CFN template link to replace the existing template:
+To update the existing CFN stack, use the Cloudformation UI or AWS CLI and pass the following CFN template link to replace the existing template:
 ```
 https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-nat-provision-lambda/v5/cloudformation-lambda.yaml
 ```
@@ -50,8 +50,10 @@ For anyone contributing to the code of the NAT Gateway Provision Lambda, make su
 
 ```bash
 cd deployer
+terraform init
 terraform apply -auto-approve
 
 cd test
+terraform init
 ./test.sh
 ```

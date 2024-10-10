@@ -6,7 +6,7 @@ role=ElastioNatProvisionLambdaDeployer
 account=$(aws sts get-caller-identity --query 'Account' --output text)
 role_arn="arn:aws:iam::${account}:role/${role}"
 
-output=$(aws sts assume-role --role-arn "$role_arn" --role-session-name vkryvenko)
+output=$(aws sts assume-role --role-arn "$role_arn" --role-session-name elastio-nat-provision-lambda-deployer-test)
 
 AWS_REGION=$(aws configure get region || echo us-east-2)
 export AWS_REGION

@@ -56,7 +56,7 @@ Parameters:
     Type: String
     Default: 'VirtualMachine'   
   ElastioScanAfterCopyDestination:
-    Description: The Arn of the AWS Backup Vault to copy after a successfull Elastio Scan
+    Description: The Arn of the AWS Backup Vault to copy after a successful Elastio Scan
     Type: String
   ElastioTagKey:
     Type: String
@@ -652,7 +652,7 @@ Resources:
                         enable_rp_fwd = RP_FWD_TAG in tag_list 
                         restore_job_id = event_detail.get('restoreJobId')
 
-                        #Existance of Scan enable or the Lambda trigger tag
+                        #Existence of Scan enable or the Lambda trigger tag
                         if enable_elastio_scan:
                             backup_vault_name = find_aws_backup_vault_name(recovery_point_arn)
                             logger.info(f"Elastio scanning enabled for {backup_vault_name}:{recovery_point_arn} via tag_list : {tag_list}")
@@ -867,7 +867,7 @@ Resources:
                 
             def process_ransomware_details(account_id,product_arn,generator_id,scan_timestamp,aws_asset_id,aws_backup_rp_arn,elastio_rp_id,ransomware_details):
                 """
-                This is the function responsbile to create ransomware findings based on ransomware_details
+                This is the function responsible to create ransomware findings based on ransomware_details
                 """      
                 try:
                     logger.info('Starting process_ransomware_details')
@@ -902,7 +902,7 @@ Resources:
                     
             def process_malware_details(account_id,product_arn,generator_id,scan_timestamp,aws_asset_id,aws_backup_rp_arn,elastio_rp_id,malware_details):
                 """
-                This is the function responsbile to create malware findings based on malware_details
+                This is the function responsible to create malware findings based on malware_details
                 """        
                 try:
                     logger.info('Starting process_malware_details')
@@ -1279,7 +1279,7 @@ Resources:
                     if s3_log_bucket:
                         save_event_data_to_s3(s3_log_bucket,scan_event_data)
                     else:
-                        logger.info('S3 Log Bucket Name Env Paramter LogsBucketName is missing. Skipping logging to S3 Bucket')
+                        logger.info('S3 Log Bucket Name Env Parameter LogsBucketName is missing. Skipping logging to S3 Bucket')
                     event_details = scan_event_data['detail']
                     elastio_scan_reports = event_details.get('reports')
                     if elastio_scan_reports:

@@ -197,9 +197,10 @@ Resources:
                 
                 resource_type = resource_type.lower()
                 new_tag_list = {
+                    "awsb:original-asset:id": resource_id,
                     "awsb:original-asset:account-id": account_id,
                     "awsb:original-asset:region": region,
-                    "awsb:original-asset:rp-rn": recovery_point_arn
+                    "awsb:original-asset:rp-arn": recovery_point_arn
                 }              
                 
                 try:
@@ -427,10 +428,10 @@ Resources:
 
             def create_efs_mount_targets(efs_file_system_id, subnets, security_group_id):
                 try:
-                    if subnets:
-                        logger.info(f"create_efs_mount_targets for subnet {subnets} with SG : {security_group_id} for FS : {efs_file_system_id}")
+                    if subnets:                        
                         for subnet in subnets:
                             subnet_id = subnet['SubnetId']
+                            logger.info(f"create_efs_mount_targets for subnet : {subnet_id} with SG : {security_group_id} for FS : {efs_file_system_id}")
                             response = efs_client.create_mount_target(
                                 FileSystemId=efs_file_system_id,
                                 SubnetId=subnet_id,
@@ -1626,8 +1627,7 @@ Resources:
               Statement:
               - Effect: Allow
                 Action:
-                - elasticfilesystem:CreateMountTarget
-                - elasticfilesystem:DescribeMountTargetSecurityGroups
+                - elasticfilesystem:*MountTarget*
                 Resource: '*'                    
           - PolicyName: secHubPermissions
             PolicyDocument:

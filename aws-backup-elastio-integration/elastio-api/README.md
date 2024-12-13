@@ -100,7 +100,6 @@ Elastio Connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
     // Optional.
     "user_data": "my user data",
 
-
     // S3 changelog queue URL for the restored S3 bucket that allows Elastio to read
     // the bucket in parallel with AWS Backup filling it with restored objects.
     //

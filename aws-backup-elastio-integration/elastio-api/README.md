@@ -99,6 +99,13 @@ Elastio Connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
     //
     // Optional.
     "user_data": "my user data",
+
+    // S3 changelog queue URL for the restored S3 bucket that allows Elastio to read
+    // the bucket in parallel with AWS Backup filling it with restored objects.
+    //
+    // This is optional, and if not provided, the scan will be done without
+    // using the S3 changelog queue.
+    "s3_changelog_queue": "https://sqs.us-east-2.amazonaws.com/111111111111/queue-name",
   },
 
   // In AWS Backup recovery test scenario, contains the ID of the temporarily
@@ -217,13 +224,11 @@ Elastio S3 changelog Cloudformation stack introduces this component. It deploys 
 and an EventBridge subscription for it that forwards events from the target S3 bucket.
 Documentation for Elastio S3 changelog is available [here](https://github.com/elastio/contrib/tree/master/elastio-s3-changelog).
 
-The documentation at the provided link describes the use case of incremental scanning of multiple buckets. However, for AWS Backup restore testing validation of S3 it's possible to use a lighter-weight version of the Cloudformation
-stack that serves just for a single S3 bucket.
-
+The documentation at the provided link describes the use case of incremental scanning of multiple buckets. However, for AWS Backup restore testing validation of S3 it's possible to use a lighter-weight version of the Cloudformation stack that serves just for a single S3 bucket.
 
 The template `cloudformation-single-bucket.yaml` deploys a special case of a stack for a single bucket. Use this [quick-create link](https://us-east-2.console.aws.amazon.com/cloudformation/home?region=us-east-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-single-bucket.yaml&stackName=elastio-s3-changelog) to experiment with this stack. Its final template artifact developed by Elastio is always available under the following S3 link: <https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-single-bucket.yaml>. You can use this template URL when deploying the stack into production.
 
-Elastio AWS Backup integration lambda can automatically discover the S3 changelog from the deployed stack, and use it if it is present. You don't need to pass any additional parameters in the JSON request to the lambda. Just make sure the stack is created at the beginning of the restore testing validation process and exists while it is running.
+Make sure the stack is created at the beginning of the restore testing validation process and exists while it is running. You also need to get the value of `queueUrl` output from this Cloudformation stack and pass it as the `iscan.s3_changelog_queue` parameter in the request to the Elastio AWS Backup integration lambda.
 
 Elastio doesn't delete the S3 changelog Cloudformation stack automatically, so make sure you delete it once the restore testing validation is done and it is not needed anymore.
 

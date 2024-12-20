@@ -39,6 +39,13 @@ Elastio Connector stack deploys an AWS Lambda function named `elastio-bg-jobs-se
   // Required.
   "aws_backup_rp_arn": "arn:aws:ec2:eu-central-1::snapshot/snap-069324f1f1b639172",
 
+  // The account ID where AWSB RP is located. This is required in case if the
+  // RP comes from the different account.
+  //
+  // Optional. If omitted or `null` then the account ID of the Elastio Connector
+  // stack that contains the lambda that handles this request is used.
+  "aws_backup_rp_account_id": "111111111111",
+
   // Name of the target `elastio` vault. It determines in what subnets Elastio
   // runs the job worker. For import operations it also determines where Elastio
   // stores the imported RP.

@@ -38,6 +38,8 @@ Metadata:
             default: Tag value for EventBus access control
         ElastioDefaultVaultName:
             default: Default Elastio Vault Name
+        ElastioChangelogStackURL:
+            default: Elastio S3 Scan changelog stack URL
 
 Parameters:
   LogsBucketName:
@@ -70,6 +72,10 @@ Parameters:
     Type: String
     Description: 'The Name of the Elastio Default Vault Name.[DO NOT MODIFY Unless Advised]'
     Default: 'default'   
+  ElastioChangelogStackURL:
+    Type: String
+    Description: 'The URL for the S3 scan changelog stack.[DO NOT MODIFY Unless Advised]'
+    Default: 'https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-single-bucket.yaml'
   RestoreSimulationInstanceType:
     Type: String
     Description: 'The instance type for the Restore Simulated Virtual Machine.[DO NOT MODIFY Unless Advised]'
@@ -120,6 +126,7 @@ Resources:
           ElastioSupportedRTForRestoreSimulation: !Ref ElastioSupportedRTForRestoreSimulation
           RestoreSimulationInstanceType: !Ref RestoreSimulationInstanceType
           ElastioDefaultVaultName: !Ref ElastioDefaultVaultName
+          ElastioChangelogStackURL: !Ref ElastioChangelogStackURL
       Runtime: python3.12
       Architectures: 
             - arm64
@@ -136,10 +143,10 @@ Resources:
             import traceback
             import json
             import uuid
+            import time
+            import hashlib
             import boto3
             from botocore.exceptions import ClientError
-
-        
 
             logger = logging.getLogger()
             logger.setLevel(logging.INFO)
@@ -299,17 +306,35 @@ Resources:
                 resource_type = resource_type.lower()
 
                 try:
-                    if resource_type in ('ec2', 'ebs'):
-                        tags_to_apply = [{'Key': key, 'Value': value} for key, value in new_tag_list.items() if not key.startswith('aws:')]
-                        logger.info(f"Applying {tags_to_apply} to {resource_id}")
-                        resource_handlers[resource_type](Resources=[resource_id], Tags=tags_to_apply)
-                    
-                    elif ':backup:' in recovery_point_arn:
-                        logger.info(f"Applying {new_tag_list} to {recovery_point_arn}")
-                        resource_handlers['backup'](ResourceArn=recovery_point_arn, Tags=new_tag_list)
-                    
+                    #arn:aws:backup:us-east-1:142263280704:recovery-point:d02d977f-548f-4d64-a008-d36d1b2f8952
+                    parts = recovery_point_arn.split(":")
+                    resource_account_id = parts[4] if len(parts) >= 5 else None
+                    if ((resource_account_id is None or resource_account_id == '') and resource_type in ('ec2', 'ebs')):
+                        try:
+                            ec2_client = boto3.client('ec2')
+                            if resource_type == 'ebs':
+                                response = ec2_client.describe_snapshots(SnapshotIds=[resource_id])
+                                resource_account_id = response['Snapshots'][0]['OwnerId']
+                            elif resource_type == 'ec2':
+                                response = ec2_client.describe_images(ImageIds=[resource_id])
+                                resource_account_id = response['Images'][0]['OwnerId']                            
+                        except ClientError as e:
+                            logger.error(f"Error describing recovery point {recovery_point_arn}: {e}")
+                        except Exception as e:
+                            logger.error(f"Unexpected error describing recovery point {recovery_point_arn}: {e}")
+                    current_account_id = boto3.client("sts").get_caller_identity()["Account"]
+                    if resource_account_id == current_account_id:
+                        if ':backup:' in recovery_point_arn:
+                                logger.info(f"Applying {new_tag_list} to {recovery_point_arn}")
+                                resource_handlers['backup'](ResourceArn=recovery_point_arn, Tags=new_tag_list)
+                        elif resource_type in ('ec2', 'ebs'):
+                            tags_to_apply = [{'Key': key, 'Value': value} for key, value in new_tag_list.items() if not key.startswith('aws:')]
+                            logger.info(f"Applying {tags_to_apply} to {resource_id}")
+                            resource_handlers[resource_type](Resources=[resource_id], Tags=tags_to_apply)
+                        else:
+                            logger.info(f"{resource_type} Not Supported Yet. Skipping Processing")
                     else:
-                        logger.info(f"{resource_type} Not Supported Yet. Skipping Processing")
+                        logger.info(f"{recovery_point_arn} in {resource_account_id} is NOT owned by the account : {current_account_id}. Skipping Processing")
                 
                 except ClientError as e:
                     logger.error(f"AWS API error while setting tags for {resource_type} {resource_id}: {e}")
@@ -542,14 +567,22 @@ Resources:
                         if ':backup-vault:' not in resource:
                             recovery_point_arn = resource
                     tag_list = None
-                    if job_event_state != 'COMPLETED':
-                        logger.info(f'Combination of detail_type : {detail_type} and job_event_state :{job_event_state} NOT handled !!')
+                    enable_elastio_scan = None
+                    enable_rp_fwd = None
+                    logger.info(f'Processing detail_type : {detail_type} , job_event_state :{job_event_state} for recovery_point_arn :{recovery_point_arn} ')
+                    if job_event_state not in ('COMPLETED', 'RUNNING'):
+                        logger.error(f'Combination of detail_type : {detail_type} and job_event_state :{job_event_state} NOT handled !!')
                         return
                     else:
                         backup_client = boto3.client('backup')
-                        response = backup_client.list_tags(ResourceArn=recovery_point_arn)
-                        tag_list = response.get('Tags')            
-                    logger.info(f'tag_list : {tag_list}')
+                        try:
+                            response = backup_client.list_tags(ResourceArn=recovery_point_arn)
+                            tag_list = response.get('Tags')
+                            enable_elastio_scan = ENABLE_ELASTIO_SCAN_TAG in tag_list
+                            enable_rp_fwd = RP_FWD_TAG in tag_list                             
+                        except Exception:
+                            var = traceback.format_exc()
+                            logger.error(f"Error {var} in list_tags processing {recovery_point_arn}")                        
                     SUPPORTED_TYPE_FOR_SIMULATION = os.environ.get('ElastioSupportedRTForRestoreSimulation')
                     if not SUPPORTED_TYPE_FOR_SIMULATION:
                         logger.info('NO supported ResourceType defined for RestoreSimulation. Defaulting to VirtualMachine')
@@ -559,10 +592,14 @@ Resources:
                         logger.info(f'Handling AWS Backup event for :{job_event_state} and {detail_type} for recovery_point_arn:{recovery_point_arn}') 
                         backup_vault_name = event_detail.get('backupVaultName')
                         iam_role_arn=event_detail.get('iamRoleArn')
+                        backup_vault_arn = event_detail.get('backupVaultArn')
+                        parts = backup_vault_arn.split(":")
+                        backup_vault_account_id = parts[4] if len(parts) >= 5 else None                        
                         if recovery_point_arn:                
                             response = backup_client.describe_recovery_point(
                                 BackupVaultName=backup_vault_name,
-                                RecoveryPointArn=recovery_point_arn)
+                                RecoveryPointArn=recovery_point_arn,
+                                BackupVaultAccountId=backup_vault_account_id)
                             resource_type = response.get('ResourceType')
                             enable_extended_tagging = os.environ.get('EnableExtendedTagging')
                             if enable_extended_tagging and enable_extended_tagging.lower() in ['true', '1', 't', 'y','yes']:
@@ -571,8 +608,7 @@ Resources:
                             else:
                                 logger.info(f'Extended Tagging is Disabled for Arn : {recovery_point_arn}')   
 
-                            enable_elastio_scan = ENABLE_ELASTIO_SCAN_TAG in tag_list
-                            enable_rp_fwd = RP_FWD_TAG in tag_list
+
                             if resource_type == SUPPORTED_TYPE_FOR_SIMULATION and enable_elastio_scan:
                                 logger.info(f'{recovery_point_arn} of type : {resource_type} is enabled for Elastio Scan')
                                 response = backup_client.get_recovery_point_restore_metadata(BackupVaultName=backup_vault_name,RecoveryPointArn=recovery_point_arn)
@@ -625,21 +661,126 @@ Resources:
                                     logger.error(f'Restore Metadata is missing. Skipping Restore Test Simulation for {backup_vault_name}:{recovery_point_arn}')
                             else:
                                 logger.info(f'ResourceType :{resource_type} in {backup_vault_name}:{recovery_point_arn} not a Restore Simulation enabled, Current List : {SUPPORTED_TYPE_FOR_SIMULATION}.')
-                    #Handle only COMPLETED Restore Job completion events
+                    #Handle only COMPLETED / RUNNING Restore Job completion events
                     elif detail_type == "Restore Job State Change":
+                        resource_type = event_detail.get('resourceType')
+                        job_event_state = event_detail.get('status')
                         restore_job_id = event_detail.get('restoreJobId')
                         logger.info(f'Processing restore_job_id :{restore_job_id}')
+                        isRTJob = False
                         rt_plan_arn = event_detail.get('restoreTestingPlanArn')
                         if rt_plan_arn:
                             logger.info(f'restore_job_id :{restore_job_id} part of rt_plan : {rt_plan_arn}')
+                            isRTJob = True
                         else:
                             logger.info(f'restore_job_id :{restore_job_id} part NOT part of any rt_plan')
                             rt_plan_arn=f'on-demand-{restore_job_id}'
+                        
+                        created_resource_arn = None  
+                        # For resource_type as S3 and job_event_state as RUNNING, call describe_restore_job with RestoreJobId as restore_job_id. 
+                        # Repeat this until the response has CreatedResourceArn and continue. If S3 RT job , then use the meta data for the creatd resource arn
+                        # For resource_type other than S3, return or continue only if job_event_state is COMPLETED
+                        if resource_type == 'S3' and job_event_state == 'RUNNING':
+                            if isRTJob:
+                                response = backup_client.get_restore_job_metadata(RestoreJobId=restore_job_id)
+                                metadata = response.get('Metadata', {})
+                                created_resource_arn = metadata.get('destinationbucketname')
+                            else:
+                                max_retries = 30  # Set a maximum number of retries
+                                retries = 0
+                                while retries < max_retries:
+                                    response = backup_client.describe_restore_job(RestoreJobId=restore_job_id)
+                                    created_resource_arn = response.get('CreatedResourceArn')
+                                    if created_resource_arn:
+                                        break
+                                    logger.info(f'Waiting for CreatedResourceArn for restore_job_id: {restore_job_id}')
+                                    time.sleep(10)  # Wait for 10 seconds before retrying
+                                    retries += 1
+                                if not created_resource_arn:
+                                    logger.error(f'Failed to get CreatedResourceArn for restore_job_id: {restore_job_id} after {max_retries} retries')
+                        elif job_event_state == 'COMPLETED':
+                            created_resource_arn = event_detail.get('createdResourceArn')                  
+                        else:      
+                            return
+                        sqs_queue = None
+                        logger.info(f'Processing {resource_type}:{created_resource_arn} under job_event_state :{job_event_state}' )
+                        if resource_type == 'S3' and created_resource_arn:
+                            if ':::' in created_resource_arn:
+                                bucket_name = created_resource_arn.split(':::')[1]
+                            else:
+                                bucket_name = created_resource_arn
+                            if not bucket_name:
+                                logger.error(f'Failed to get bucket_name for restore_job_id: {restore_job_id}')
+                                return
+                            bucket_name_hash = hashlib.md5(bucket_name.encode())
+                            bucket_name_hash=bucket_name_hash.hexdigest()
+                            stack_name = f"elastio-s3-changelog-{bucket_name_hash}"
+                            logger.info(f'Processing S3 Restore Job Completion with stack : {stack_name} for bucket : {bucket_name}')
+                            sqs_client = boto3.client('sqs')
+                            stack_parameters = [
+                                {
+                                    "ParameterKey": "BucketName",
+                                    "ParameterValue": bucket_name
+                                },
+                                {
+                                    "ParameterKey": "ScanExistingObjects",
+                                    "ParameterValue": "true"
+                                },
+                                {
+                                    "ParameterKey": "EnableDlq",
+                                    "ParameterValue": "false"
+                                },
+                                {
+                                    "ParameterKey": "KeyPrefixes",
+                                    "ParameterValue": ""
+                                }
+                            ]
+                            stack_tags = [
+                                {
+                                    "Key": "elastio:resource",
+                                    "Value": "true"
+                                }
+                            ]
+                            if job_event_state == 'COMPLETED':
+                                logger.info(f'Handing S3 Restore Job Completion with stack : {stack_name}')
+                                try:
+                                    cfn_client = boto3.client('cloudformation')
+                                    response = cfn_client.describe_stacks(StackName=stack_name)
+                                    sqs_queue = next(output['OutputValue'] for output in response['Stacks'][0]['Outputs'] if output['OutputKey'] == 'queueUrl')
+                                    if sqs_queue:
+                                        sqs_client.send_message(
+                                            QueueUrl=sqs_queue,
+                                            MessageBody=json.dumps({"kind": "EndOfEvents"})
+                                        )
+                                        logger.info(f'EndOfEvents messages sent to queue : {sqs_queue}')
+                                    else:
+                                        logger.error(f'{sqs_queue} missing in response for stack. Stack is NOT created or deleted. Skipping processing')
+                                except Exception:
+                                    var = traceback.format_exc()
+                                    logger.error(f"Error {var} in handling COMPLETED processing stack_name : {stack_name}")                                    
+                                return
+                            else:
+                                elastio_s3_changelog_stack_url = os.environ.get('ElastioChangelogStackURL')
+                                if not elastio_s3_changelog_stack_url:
+                                    logger.info('ElastioChangelogStackURL env variable NOT defined. Defaulting value.')
+                                    elastio_s3_changelog_stack_url = 'https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-single-bucket.yaml'
 
-                        created_resource_arn = event_detail.get('createdResourceArn')
-                        resource_type = event_detail.get('resourceType')
-                        job_event_state = event_detail.get('status')
-                        logger.info(f'Processing :{resource_type}:{created_resource_arn} under job_event_state :{job_event_state}' )
+                                cfn_client = boto3.client('cloudformation')
+                                try:
+                                    logger.info(f'Calling create_stack with {stack_name} using parameters : {stack_parameters}')
+                                    response = cfn_client.create_stack(
+                                        StackName=stack_name,
+                                        TemplateURL=elastio_s3_changelog_stack_url,
+                                        Parameters=stack_parameters,
+                                        Tags=stack_tags
+                                    )
+                                    logger.info(f'Calling stack_create_complete with {stack_name} for response : {response}')
+                                    waiter = cfn_client.get_waiter('stack_create_complete')
+                                    waiter.wait(StackName=stack_name)
+                                except cfn_client.exceptions.AlreadyExistsException:
+                                    logger.warning(f'Stack {stack_name} already exists. Skipping creation.')
+                                response = cfn_client.describe_stacks(StackName=stack_name)
+                                sqs_queue = next(output['OutputValue'] for output in response['Stacks'][0]['Outputs'] if output['OutputKey'] == 'queueUrl')
 
                         recovery_point_arn = None
                         for resource in resources:
@@ -647,12 +788,17 @@ Resources:
                                 recovery_point_arn = resource
 
                         backup_client = boto3.client('backup')
-                        response = backup_client.list_tags(ResourceArn=recovery_point_arn)
-                        tag_list = response.get('Tags')
-                        enable_elastio_scan = ENABLE_ELASTIO_SCAN_TAG in tag_list
-                        enable_rp_fwd = RP_FWD_TAG in tag_list 
-                        restore_job_id = event_detail.get('restoreJobId')
-
+                        tag_list = None
+                        enable_elastio_scan = None
+                        enable_rp_fwd = None
+                        try:
+                            response = backup_client.list_tags(ResourceArn=recovery_point_arn)
+                            tag_list = response.get('Tags')
+                            enable_elastio_scan = ENABLE_ELASTIO_SCAN_TAG in tag_list
+                            enable_rp_fwd = RP_FWD_TAG in tag_list                             
+                        except Exception:
+                            var = traceback.format_exc()
+                            logger.error(f"Error {var} in list_tags processing {recovery_point_arn}")
                         #Existence of Scan enable or the Lambda trigger tag
                         if enable_elastio_scan:
                             backup_vault_name = find_aws_backup_vault_name(recovery_point_arn)
@@ -669,8 +815,6 @@ Resources:
                                     elastio_lambda_arn = tag_list[LAMBDA_TRIGGER_TAG].lower()
                                 else:
                                     raise Exception('ElastioImportLambdaARN is missing!')
-                            
-                            rt_plan_arn = event_detail.get('restoreTestingPlanArn')
                             if not rt_plan_arn:
                                 logger.info(f'Response NOT part of restore testing (RT) feature. Validating whether its an RT Simulation Job : {restore_job_id}.')
                                 #Look for awsb:rt-simulator:restore-job-id
@@ -709,8 +853,12 @@ Resources:
                             elif resource_type in ('S3'):
                                 if ':::' in created_resource_arn:
                                     restored_resource_id = created_resource_arn.split(':::')[1]
-                                    logger.info('S3 does NOT support Ransomware Scanning. Setting ransomware to False')
-                                input_params["iscan"]["ransomware"] = False
+                                else:
+                                    restored_resource_id = created_resource_arn
+                                if restored_resource_id:
+                                    if sqs_queue:      
+                                        logger.info(f'S3 s3_changelog_queue set as {sqs_queue}')             
+                                        input_params["iscan"]["s3_changelog_queue"] = sqs_queue
                             elif resource_type == SUPPORTED_TYPE_FOR_SIMULATION:
                                 #Handle tagging the created resource arn ebs volumes with appropriate tags
                                 response = backup_client.get_recovery_point_restore_metadata(BackupVaultName=backup_vault_name,RecoveryPointArn=recovery_point_arn)
@@ -731,7 +879,8 @@ Resources:
                                 #Handle EBS/ EC2
                                 if -1 != created_resource_arn.find("/"):
                                     # Handle for EC2 and EBS
-                                    restored_resource_id = created_resource_arn.split("/")[1]                            
+                                    restored_resource_id = created_resource_arn.split("/")[1]   
+                                    input_params["iscan"]["fs_check"] = True                         
                             
                             logger.info(f'Processing restored_resource_id :{restored_resource_id} for Resource Type : {resource_type}')
                             #invoke the lambda
@@ -873,7 +1022,7 @@ Resources:
                 try:
                     logger.info('Starting process_ransomware_details')
                     title = 'Ransomware scan results'
-                    ransomware_report = ransomware_details['report']
+                    ransomware_report = ransomware_details.get('report')
                     if ransomware_report:
                         ransomware_encrypted_files = ransomware_report.get('encrypted_files')
                         if ransomware_encrypted_files:
@@ -908,7 +1057,8 @@ Resources:
                 try:
                     logger.info('Starting process_malware_details')
                     title = 'Malware scan results'
-                    malware_report = malware_details['report']
+                    malware_report = malware_details.get('report')
+                    error_report = malware_details.get('error')
                     if malware_report:
                         malware_suspicious_files = malware_report.get('suspicious_files')
                         if malware_suspicious_files:
@@ -958,19 +1108,20 @@ Resources:
                         if user_data:
                             logger.info(f'user_data : {user_data}')
                             user_data_list = user_data.split(',')
-                            #"user_data": f'{backup_vault_name},{enable_rp_fwd},{rt_plan_arn},{restore_job_id},{recovery_point_arn},{created_resource_arn}'
                             if len(user_data_list) > 0:
                                 backup_vault_name=user_data_list[0]
                             if len(user_data_list) > 1:
-                                enable_rp_fwd=bool(user_data_list[1])                                
+                                enable_rp_fwd=bool(user_data_list[1])
                             if len(user_data_list) > 2:
                                 rt_plan_arn = user_data_list[2]
-                            if len(user_data_list) > 3:                             
-                                restore_job_id = user_data_list[3]
+                            if len(user_data_list) > 3:                                
+                                restore_job_id = user_data_list[3] 
+                            if len(user_data_list) > 4:
+                                aws_backup_rp_arn = user_data_list[4]                                   
+                            if len(user_data_list) > 5:
+                                created_resource_arn = user_data_list[5]                                            
 
                         aws_asset_id = scan_summary.get('aws_asset_id')
-                        
-
                         is_rp_clean = scan_summary.get('clean')
                         summary_details = elastio_report.get('summary')
                         status_message = 'Recovery point is clean of Malware and Ransomware infection.'
@@ -981,8 +1132,10 @@ Resources:
                                 status = 'FAILED'
                                 ransomware_files_detected = summary_details.get("ransomware_files_detected")                    
                                 malware_files_detected = summary_details.get("malware_files_detected")
-                                status_message = f'Recovery point is compromised with {malware_files_detected} Malware and {ransomware_files_detected} Ransomware infection(s).'
-                            else:
+                                if ransomware_files_detected == 0 and malware_files_detected == 0:
+                                    status_message = 'Scan failed with error. Check elastio logs for details.'
+                                else:
+                                    status_message = f'Recovery point is compromised with {malware_files_detected} Malware and {ransomware_files_detected} Ransomware infection(s).'
                                 if enable_rp_fwd:
                                     #Forward the original recovery point to a safe vault once the scan is clean
                                     if backup_vault_name and AWSB_COPY_IAM_ROLE and ELASTIO_SCAN_AFTER_COPY_DESTINATION:
@@ -998,9 +1151,20 @@ Resources:
                             
                         except (ClientError, Exception):
                             var = traceback.format_exc()
-                            logger.error(f"Error {var} processing update_rt_job_status")            
-                        
+                            logger.error(f"Error {var} processing update_rt_job_status")   
 
+                        logger.info(f'Handle cleanup of the original stack :{created_resource_arn}')
+                        if created_resource_arn:
+                            try:
+                                bucket_name_hash = hashlib.md5(created_resource_arn.encode())
+                                bucket_name_hash = bucket_name_hash.hexdigest()
+                                stack_name = f"elastio-s3-changelog-{bucket_name_hash}"
+                                logger.info(f'Processing Elastio Scan Results for stack : {stack_name} for bucket : {created_resource_arn}')                    
+                                cfn_client = boto3.client('cloudformation')
+                                response = cfn_client.delete_stack(StackName=stack_name)
+                                logger.info(f'delete_stack initiated for : {stack_name}')  
+                            except Exception as e:
+                                logger.error(f"Error deleting stack {stack_name}: {str(e)}")                                  
                 except (ClientError, Exception):
                     var = traceback.format_exc()
                     logger.error(f"Error {var} processing update_rp_validation_status")   
@@ -1283,6 +1447,10 @@ Resources:
                         logger.info('S3 Log Bucket Name Env Parameter LogsBucketName is missing. Skipping logging to S3 Bucket')
                     event_details = scan_event_data['detail']
                     elastio_scan_reports = event_details.get('reports')
+                    rt_plan_arn = None
+                    restore_job_id = None
+                    created_resource_arn = None
+                    aws_backup_rp_arn = None
                     if elastio_scan_reports:
                         enable_sechub_integration = os.environ.get('EnableSHIntegration')
                         if not enable_sechub_integration:
@@ -1296,10 +1464,6 @@ Resources:
                         update_rp_validation_status(scan_event_data)
                     else:
                         user_data = event_details.get('user_data')
-                        rt_plan_arn = None
-                        restore_job_id = None
-                        created_resource_arn = None
-                        aws_backup_rp_arn = None
                         #"user_data": f'{backup_vault_name},{enable_rp_fwd},{rt_plan_arn},{restore_job_id},{recovery_point_arn},{created_resource_arn}'
                         if user_data:
                             logger.info(f'user_data : {user_data}')
@@ -1316,7 +1480,13 @@ Resources:
                                 aws_backup_rp_arn = user_data_list[4]                                   
                             if len(user_data_list) > 5:
                                 created_resource_arn = user_data_list[5]                                            
-                        status_message = event_details.get('error_message') 
+                        status_message = event_details.get('error_message')
+                        if not status_message:
+                            #If no status_message then check for 'error' in ransomare or malware items
+                            for report in event_details.get('reports', []):
+                                if 'error' in report:
+                                    status_message = report['error']
+                                    break
                         logger.error(f'Elastio scan failed for {rt_plan_arn} :{restore_job_id} with error : {status_message} ')
                         status = 'FAILED'
                         if restore_job_id:
@@ -1326,10 +1496,30 @@ Resources:
                             if rt_plan_arn.startswith('rt-simulation'):
                                 restored_resource_id = created_resource_arn.split("/")[1]
                                 terminate_restore_tested_instance(restored_resource_id)
+
+                        logger.info(f'Handle cleanup of the original stack :{created_resource_arn}')
+                        if created_resource_arn:
+                            try:
+                                if ':::' in created_resource_arn:
+                                    bucket_name = created_resource_arn.split(':::')[1]
+                                else:
+                                    bucket_name = created_resource_arn
+                                if not bucket_name:
+                                    logger.error(f'Failed to get bucket_name for restore_job_id: {restore_job_id}')
+                                    return
+                                bucket_name_hash = hashlib.md5(created_resource_arn.encode())
+                                bucket_name_hash = bucket_name_hash.hexdigest()
+                                stack_name = f"elastio-s3-changelog-{bucket_name_hash}"
+                                logger.info(f'Processing Elastio Scan Results for stack : {stack_name} for bucket : {created_resource_arn}')                    
+                                cfn_client = boto3.client('cloudformation')
+                                response = cfn_client.delete_stack(StackName=stack_name)
+                                logger.info(f'delete_stack initiated for : {stack_name}')  
+                            except Exception as e:
+                                logger.error(f"Error deleting stack {stack_name}: {str(e)}")                                  
                 except Exception as e:
                     logger.error(
                         f"Error : {e} processing handle_elastio_iscan_event"
-                    )
+                    )                
 
             def terminate_restore_tested_instance(instance_id):
                 """
@@ -1467,6 +1657,7 @@ Resources:
           - 'Restore Job State Change'     
         detail:
           status:
+            - RUNNING
             - COMPLETED               
       Targets: 
         - Arn: !GetAtt "ElastioHelperLambda.Arn"
@@ -1520,7 +1711,6 @@ Resources:
             Action: "events:PutEvents"
             Resource: !GetAtt "ElastioHelperEventBus.Arn"
 
-  #TODO Move this to another stack and deploy it on demand
   ElastioHelperLambdaRole:
     Type: 'AWS::IAM::Role'
     Metadata:    
@@ -1593,7 +1783,8 @@ Resources:
                 - backup:UntagResource
                 - backup:DescribeRecoveryPoint                
                 - backup:DescribeRecoveryPoint
-                - backup:GetRecoveryPointRestoreMetadata     
+                - backup:GetRecoveryPointRestoreMetadata
+                - backup:GetRestoreJobMetadata     
                 - backup:StartRestoreJob
                 - backup:StartCopyJob
                 - backup:DescribeRestoreJob
@@ -1628,7 +1819,34 @@ Resources:
               - Effect: Allow
                 Action:
                 - elasticfilesystem:*MountTarget*
-                Resource: '*'                    
+                Resource: '*' 
+          - PolicyName: elastioCfnPermissions
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+              - Effect: Allow
+                Action:
+                - sqs:SendMessage
+                - sqs:createqueue
+                - sqs:tagqueue
+                - sqs:*queueattributes
+                - scheduler:*Schedule
+                - events:*Rule
+                - sqs:deletequeue
+                - ssm:*Parameter
+                - events:*Targets
+                - ssm:AddTagsToResource
+                Resource: '*'
+          - PolicyName: cloudformationPermissions
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+              - Effect: Allow
+                Action:
+                - cloudformation:CreateStack
+                - cloudformation:DeleteStack
+                - cloudformation:DescribeStacks
+                Resource: '*'                   
           - PolicyName: secHubPermissions
             PolicyDocument:
               Statement:                       

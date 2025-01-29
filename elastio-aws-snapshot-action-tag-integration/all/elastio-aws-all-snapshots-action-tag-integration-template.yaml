@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'This stack deploys the components required to integrate AWS snapshots with Elastio'
+Parameters:
+  ElastioActionTagValue:
+    Description: The value for the "elastio:action" tag to be added to snapshot. Possible values are scan, ingest, ingest-and-scan.
+    Type: String
+    Default: "scan"
+Resources:
+  LambdaExecutionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "lambda.amazonaws.com"
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: "ElastioSnapshotTaggingPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "ec2:CreateTags"
+                  - "ec2:DescribeTags"
+                Resource: "*"
+
+  LambdaFunction:
+    Type: "AWS::Lambda::Function"
+    Properties:
+      Timeout: 120
+      Handler: "index.lambda_handler"
+      Runtime: python3.11
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          ElastioActionTagValue: !Ref ElastioActionTagValue
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          import json
+          
+          def lambda_handler(event, context):
+              print("Received event:", json.dumps(event))
+              
+              elastio_action_tag_value = os.environ.get('ElastioActionTagValue')
+              ec2_client = boto3.client('ec2')
+              snapshot_ids = []
+              
+              def extract_snapshot_id(snapshot_id):
+                  # Handle case where snapshot_id is a full ARN
+                  if snapshot_id.startswith('arn:aws:ec2:'):
+                      return snapshot_id.split('/')[-1]
+                  return snapshot_id
+
+              # Handle single snapshot events
+              if event.get('detail-type') == 'EBS Snapshot Notification':
+                  snapshot_id = event.get('detail', {}).get('snapshot_id')
+                  if snapshot_id:
+                      snapshot_ids.append(extract_snapshot_id(snapshot_id))
+              
+              # Handle multi-volume snapshot events
+              elif event.get('detail-type') == 'EBS Multi-Volume Snapshots Completion Status':
+                  snapshots = event.get('detail', {}).get('snapshots', [])
+                  for snapshot in snapshots:
+                      snapshot_id = snapshot.get('snapshot_id')
+                      if snapshot_id:
+                          snapshot_ids.append(extract_snapshot_id(snapshot_id))
+              
+              print("Processing snapshot IDs:", snapshot_ids)
+              
+              if snapshot_ids:
+                  try:
+                      ec2_client.create_tags(
+                          Resources=snapshot_ids,
+                          Tags=[{'Key': 'elastio:action', 'Value': elastio_action_tag_value}]
+                      )
+                      print(f"Successfully tagged snapshots: {snapshot_ids}")
+                  except Exception as e:
+                      print(f"Error tagging snapshots: {str(e)}")
+                      raise
+              else:
+                  print("No snapshot IDs found in the event")
+                      
+  CloudWatchEventRuleSingleSnapshot:
+    Type: "AWS::Events::Rule"
+    Properties:
+      EventPattern:
+        source:
+          - "aws.ec2"
+        detail-type:
+          - "EBS Snapshot Notification"
+        detail:
+          event:
+            - "createSnapshot"
+      State: "ENABLED"
+      Targets:
+        - Arn: !GetAtt LambdaFunction.Arn
+          Id: "TargetFunctionSingle"
+
+  CloudWatchEventRuleMultiSnapshot:
+    Type: "AWS::Events::Rule"
+    Properties:
+      EventPattern:
+        source:
+          - "aws.ec2"
+        detail-type:
+          - "EBS Multi-Volume Snapshots Completion Status"
+        detail:
+          event:
+            - "createSnapshots"
+      State: "ENABLED"
+      Targets:
+        - Arn: !GetAtt LambdaFunction.Arn
+          Id: "TargetFunctionMulti"
+
+  PermissionForEventsToInvokeLambdaSingle:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt CloudWatchEventRuleSingleSnapshot.Arn
+
+  PermissionForEventsToInvokeLambdaMulti:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt CloudWatchEventRuleMultiSnapshot.Arn

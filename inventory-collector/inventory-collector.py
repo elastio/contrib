@@ -8,11 +8,11 @@ import logging
 import signal
 import sys
 from contextlib import AsyncExitStack
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass, fields
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-__version__ = '0.33.0'
+__version__ = "0.33.0"
 
 if TYPE_CHECKING:
     from types_aiobotocore_ec2 import EC2Client
@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from types_aiobotocore_fsx import FSxClient
     from types_aiobotocore_organizations import OrganizationsClient
     from types_aiobotocore_s3 import S3Client
-    from types_aiobotocore_sts import STSClient
     from aiobotocore.credentials import AioCredentials
 
 GREEN = "\033[0;32m"
@@ -52,20 +51,20 @@ except ImportError as err:
 
 arg_parser = argparse.ArgumentParser(
     description=f"Inventory collector (v{__version__}) collects inventory data from "
-        "the given AWS accounts, shows the summary of inventory volume and saves the full info "
-        "into a CSV file.",
+    "the given AWS accounts, shows the summary of inventory volume and saves the full info "
+    "into a CSV file.",
 )
 
 auth_group = arg_parser.add_argument_group(f"{GREEN}{BOLD}Auth{RESET}")
 auth_group.add_argument(
     "--assume-role",
-    help = "Name of the IAM role to assume in the processed accounts (default: %(default)s)",
-    default = 'OrganizationAccountAccessRole'
+    help="Name of the IAM role to assume in the processed accounts (default: %(default)s)",
+    default="OrganizationAccountAccessRole",
 )
 
 accs_group = arg_parser.add_argument_group(
     title=f"{GREEN}{BOLD}Accounts selection{RESET}",
-    description=f"({BOLD}default{RESET}: current account only)"
+    description=f"({BOLD}default{RESET}: current account only)",
 )
 accs_exclusive_group = accs_group.add_mutually_exclusive_group()
 
@@ -89,7 +88,7 @@ accs_group.add_argument(
 
 regions_group = arg_parser.add_argument_group(
     title=f"{GREEN}{BOLD}Regions selection{RESET}",
-    description=f"({BOLD}default{RESET}: all regions)"
+    description=f"({BOLD}default{RESET}: all regions)",
 )
 
 regions_group.add_argument(
@@ -101,7 +100,7 @@ regions_group.add_argument(
 regions_group.add_argument(
     "--exclude-regions",
     nargs="+",
-    help="Space-separated list of AWS regions to exclude from the inventory collection"
+    help="Space-separated list of AWS regions to exclude from the inventory collection",
 )
 
 arg_parser.add_argument(
@@ -122,6 +121,7 @@ args = arg_parser.parse_args()
 ### Logginc configuration ###
 #############################
 
+
 class CustomFormatter(logging.Formatter):
     LEVELS = {
         logging.DEBUG: BLUE,
@@ -135,7 +135,7 @@ class CustomFormatter(logging.Formatter):
         super().__init__(
             f"{BLACK}%(asctime)s.%(msecs)03d UTC{RESET} {GREEN}%(levelname)s{RESET} "
             f"{BOLD}%(name)s{RESET}: %(message)s",
-            datefmt='%Y-%m-%d %H:%M:%S'
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
 
     def format(self, record):
@@ -146,6 +146,7 @@ class CustomFormatter(logging.Formatter):
 
         return logging.Formatter.format(self, record)
 
+
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG if args.debug else logging.INFO)
 
@@ -154,15 +155,17 @@ handler = logging.StreamHandler(sys.stderr)
 handler.setFormatter(CustomFormatter())
 logger.addHandler(handler)
 
+
 ######################
 ### Business logic ###
 ######################
 
+
 class App:
     _current_account: str
-    _session: 'AioSession'
-    _org: 'OrganizationsClient'
-    _creds: 'AioCredentials'
+    _session: "AioSession"
+    _org: "OrganizationsClient"
+    _creds: "AioCredentials"
 
     def __init__(self):
         self._exit_stack = AsyncExitStack()
@@ -175,15 +178,21 @@ class App:
         self._creds = await self._session.get_credentials()
 
         if not self._creds:
-            raise Exception("No credentials found. Please configure your AWS credentials.")
+            raise Exception(
+                "No credentials found. Please configure your AWS credentials."
+            )
 
-        self._org = self._exit_stack.enter_async_context(self._session.create_client("organizations"))
-        sts = await self._exit_stack.enter_async_context(self._session.create_client("sts"))
+        self._org = await self._exit_stack.enter_async_context(
+            self._session.create_client("organizations")
+        )
+        sts = await self._exit_stack.enter_async_context(
+            self._session.create_client("sts")
+        )
 
         identity = await sts.get_caller_identity()
 
-        self._current_account = identity['Account']
-        identity_arn = identity['Arn']
+        self._current_account = identity["Account"]
+        identity_arn = identity["Arn"]
 
         logger.info(f"Current account:  {BOLD}{self._current_account}{RESET}")
         logger.info(f"Current identity: {BOLD}{identity_arn}{RESET}")
@@ -202,60 +211,73 @@ class App:
 
         logger.info(f"{GREEN}Starting inventory collection...{RESET}")
 
-        futs = [
-            self.collect_inventory_in_region(acc, region)
-            for acc in accs
-            for region in regions
-        ]
+        futs = [self.collect_inventory_in_account(acc, regions) for acc in accs]
 
-        assets = [
+        assets = [asset for assets in await asyncio.gather(*futs) for asset in assets]
+
+        logger.info(
+            f"{GREEN}Inventory collection completed. "
+            f"{BOLD}{len(assets)}{RESET} {GREEN}assets collected.{RESET}"
+        )
+
+        if not assets:
+            logger.info("No assets were collected. Exiting...")
+            return
+
+        with open("inventory.csv", mode="w", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow(field.name for field in fields(Asset))
+            for asset in assets:
+                writer.writerow(
+                    (
+                        asset.account,
+                        asset.region,
+                        asset.type,
+                        asset.name,
+                        asset.id,
+                        asset.state,
+                        asset.data_size_gib,
+                    )
+                )
+
+    async def collect_inventory_in_account(
+        self, account: str, regions: list[str]
+    ) -> list["Asset"]:
+        session = await self.resolve_session(account)
+
+        futs = (
+            self.collect_inventory_in_region(session, account, region)
+            for region in regions
+        )
+
+        return [
             asset
             for assets in await asyncio.gather(*futs)
             for asset in assets
         ]
 
-        logger.info(
-            f"{GREEN}Inventory collection completed. "
-            f"{BOLD}{len(assets)}{RESET}{GREEN}assets collected.{RESET}"
-        )
+    async def collect_inventory_in_region(
+        self,
+        session: "AioSession",
+        account: str,
+        region: str,
+    ) -> list["Asset"]:
+        logger.info(f"Processing {BOLD}{account}:{region}{RESET}")
 
-        if assets:
-            with open('inventory.csv', mode='w', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow([
-                    'Account',
-                    'Region',
-                    'Type',
-                    'Name',
-                    'ID', 'State', 'Data Size (GiB)'
-                ])
-                for asset in assets:
-                    writer.writerow([asset.account, asset.region, asset.type, asset.name, asset.id, asset.state, asset.data_size_gib])
-
-        logger.info(f"{GREEN}Inventory collection completed. {len(assets)} assets collected.{RESET}")
-
-
-
-
-    async def collect_inventory_in_region(self, account: str, region: str) -> list['Asset']:
-        logger.info(f"Processing {BOLD}{account}/{region}{RESET}")
-
-        session = await self.resolve_session(account, region)
-
-        async with InventoryInRegion(session) as ctx:
+        async with InventoryInRegion(session, account, region) as ctx:
             return await ctx.collect_inventory()
 
-    async def resolve_session(self, account: str, region: str) -> 'SelfAwareAioSession':
+    async def resolve_session(self, account: str) -> "AioSession":
         if account == self._current_account:
-            return SelfAwareAioSession(account, region, self._session)
+            return self._session
 
         # Looks like there is no official way in boto to bind the assume-role
         # credentials provider with the session other than accessing the private
         # _credentials field directly. This is very dumb, but it works.
         # https://stackoverflow.com/a/66346765/9259330
-        session = AioSession(aws_access_key_id="", aws_secret_access_key="")
+        session = AioSession()
 
-        sts_session = AioSession(aws_access_key_id="", aws_secret_access_key="")
+        sts_session = AioSession()
         sts_session._credentials = self._creds
 
         assume_role_config = {
@@ -263,9 +285,9 @@ class App:
             "role_session_name": "inventory-collector",
         }
 
-        profile_name="main"
+        profile_name = "main"
 
-        config = { profile_name: assume_role_config }
+        config = {profile_name: assume_role_config}
 
         provider = aiobotocore.credentials.AioAssumeRoleProvider(
             load_config=lambda: config,
@@ -276,15 +298,17 @@ class App:
 
         session._credentials = await provider.load()
 
-        return SelfAwareAioSession(account, region, session)
-
+        return session
 
     async def discover_regions(self) -> list[str]:
         if args.regions:
             regions: list[str] = args.regions
         else:
-            response = await self._ec2.describe_regions()
-            regions = [region['RegionName'] for region in response['Regions']]
+            ec2 = await self._exit_stack.enter_async_context(
+                self._session.create_client("ec2")
+            )
+            response = await ec2.describe_regions()
+            regions = [region["RegionName"] for region in response["Regions"]]
 
         if args.exclude_regions:
             filtered_regions = [
@@ -301,7 +325,9 @@ class App:
                     f"({BOLD}{len(regions)}{RESET} will be processed)"
                 )
 
-        logger.info(f"Selected {GREEN}{BOLD}{len(regions)}{RESET} regions for processing")
+        logger.info(
+            f"Selected {GREEN}{BOLD}{len(regions)}{RESET} regions for processing"
+        )
 
         return regions
 
@@ -316,9 +342,7 @@ class App:
             accs = [self._current_account]
 
         if args.exclude_accounts:
-            filtered_accs = [
-                acc for acc in accs if acc not in args.exclude_accounts
-            ]
+            filtered_accs = [acc for acc in accs if acc not in args.exclude_accounts]
 
             total_filtered = len(accs) - len(filtered_accs)
 
@@ -338,13 +362,13 @@ class App:
     async def list_all_accounts(self, details: list[str]) -> list[str]:
         accs = [
             acc
-            async for page in self._org.get_paginator('list_accounts').paginate()
-            for acc in page['Accounts']
+            async for page in self._org.get_paginator("list_accounts").paginate()
+            for acc in page["Accounts"]
         ]
 
         total_accounts = len(accs)
 
-        accs = [acc['Id'] for acc in accs if acc['Status'] == 'ACTIVE']
+        accs = [acc["Id"] for acc in accs if acc["Status"] == "ACTIVE"]
 
         active_accs = len(accs)
         inactive_accs = total_accounts - active_accs
@@ -355,29 +379,25 @@ class App:
 
         return accs
 
-@dataclass
-class SelfAwareAioSession:
-    account: str
-    region: str
-    inner: AioSession
-
 class InventoryInRegion:
-    _ec2: 'EC2Client'
-    _efs: 'EFSClient'
-    _fsx: 'FSxClient'
-    _s3: 'S3Client'
+    _ec2: "EC2Client"
+    _efs: "EFSClient"
+    _fsx: "FSxClient"
+    _s3: "S3Client"
 
-    def __init__(self, session: SelfAwareAioSession):
+    def __init__(self, session: "AioSession", account: str, region: str):
         self._exit_stack = AsyncExitStack()
         self._session = session
+        self._account = account
+        self._region = region
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         await self._exit_stack.__aexit__(exc_type, exc_value, traceback)
 
     async def __aenter__(self):
         enter_async = self._exit_stack.enter_async_context
-        create_client = self._session.inner.create_client
-        region = self._session.region
+        create_client = self._session.create_client
+        region = self._region
 
         self._ec2 = await enter_async(create_client("ec2", region_name=region))
         self._efs = await enter_async(create_client("efs", region_name=region))
@@ -386,68 +406,75 @@ class InventoryInRegion:
 
         return self
 
-    async def collect_inventory(self) -> list['Asset']:
-        return self.collect_inventory_ec2()
+    async def collect_inventory(self) -> list["Asset"]:
+        return await self.collect_inventory_ec2()
 
-    async def collect_inventory_ec2(self) -> list['Asset']:
-        def find_name_tag(tags: list['Ec2Tag']) -> str | None:
-            return next((tag['Value'] for tag in tags if tag['Key'] == 'Name'), None)
+    async def collect_inventory_ec2(self) -> list["Asset"]:
+        def find_name_tag(tags: list["Ec2Tag"]) -> str | None:
+            return next((tag["Value"] for tag in tags if tag["Key"] == "Name"), None)
 
-
-        volumes = self._ec2.get_paginator('describe_volumes')
+        volumes = self._ec2.get_paginator("describe_volumes")
         volumes = volumes.paginate(
-            Filters=[
-                {
-                    "Name": "status",
-                    "Values": ["available", "in-use"]
-                }
-            ]
+            Filters=[{"Name": "status", "Values": ["available", "in-use"]}]
         )
         volumes = [
             Asset(
-                account=self._session.account,
-                region=self._session.region,
-                type='ec2:volume',
-                name=find_name_tag(volume.get('Tags', [])),
-                state=volume.get('State'),
-                data_size_gib=volume.get('Size')
+                account=self._account,
+                region=self._region,
+                type="ec2:volume",
+                id=volume["VolumeId"],
+                name=find_name_tag(volume.get("Tags", [])),
+                state=volume.get("State"),
+                data_size_gib=volume.get("Size"),
             )
             async for page in volumes
-            for volume in page['Volumes']
+            for volume in page["Volumes"]
         ]
 
-        instances = self._ec2.get_paginator('describe_instances')
+        prefix = f"[{self._account}:{self._region}]".ljust(29)
+
+        logger.info(
+            f"{prefix} Discovered {BOLD}{len(volumes)}{RESET} assets of type {BOLD}ec2:volume{RESET}"
+        )
+
+        instances = self._ec2.get_paginator("describe_instances")
         instances = instances.paginate(
             Filters=[
                 {
                     "Name": "instance-state-name",
-                    "Values": ["running", "stopping", "stopped"]
+                    "Values": ["running", "stopping", "stopped"],
                 }
             ]
         )
         instances = [
             Asset(
-                account=self._session.account,
-                region=self._session.region,
-                type='ec2:instance',
-                name=find_name_tag(instance.get('Tags', [])),
-                state=instance.get('State', {}).get('Name'),
+                account=self._account,
+                region=self._region,
+                type="ec2:instance",
+                id=instance["InstanceId"],
+                name=find_name_tag(instance.get("Tags", [])),
+                state=instance.get("State", {}).get("Name"),
                 data_size_gib=sum(
                     next(
                         (
                             volume.data_size_gib
-                            for volume in volumes if volume.id == volume_id
+                            for volume in volumes
+                            if volume.id == volume_id
                         ),
-                        0
+                        0,
                     )
-                    for mapping in instance.get('BlockDeviceMappings', [])
-                    if (volume_id := mapping.get('Ebs', {}).get('VolumeId'))
-                )
+                    for mapping in instance.get("BlockDeviceMappings", [])
+                    if (volume_id := mapping.get("Ebs", {}).get("VolumeId"))
+                ),
             )
             async for page in instances
-            for instance in page['Reservations']
-            for instance in instance['Instances']
+            for instance in page["Reservations"]
+            for instance in instance["Instances"]
         ]
+
+        logger.info(
+            f"{prefix} Discovered {BOLD}{len(instances)}{RESET} assets of type {BOLD}ec2:instance{RESET}"
+        )
 
         return instances + volumes
 
@@ -464,16 +491,12 @@ class Asset:
     data_size_gib: int
 
 
-
 async def main():
     try:
         async with App() as app:
             await app.run()
     except Exception as err:
-        if args.debug:
-            logger.exception(err)
-        else:
-            logger.error(err)
+        logger.exception(err)
         return 1
 
     return 0
@@ -485,6 +508,7 @@ def on_cancel(sig_number: int, _frame):
         "Exiting..."
     )
     sys.exit(1)
+
 
 # It's not possible to serialize dataclasses with the default JSON encoder.
 # The reason Python restricts this is apparently to avoid confusion that
@@ -501,16 +525,19 @@ class AnyClassEncoder(json.JSONEncoder):
             return obj.isoformat()
         elif isinstance(obj, set):
             return list(obj)
-        elif hasattr(obj, '__dict__'):
+        elif hasattr(obj, "__dict__"):
             return obj.__dict__
         else:
             return super().default(obj)
 
-def to_json(value, indent = 2):
-    return json.dumps(value, indent = indent, cls=AnyClassEncoder)
+
+def to_json(value, indent=2):
+    return json.dumps(value, indent=indent, cls=AnyClassEncoder)
+
 
 def print_json(label: str, value):
-    print(to_json({ label: value }))
+    print(to_json({label: value}))
+
 
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, on_cancel)

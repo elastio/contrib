@@ -2,26 +2,27 @@
 
 import argparse
 import asyncio
+import csv
 import json
 import logging
 import signal
 import sys
-
 from contextlib import AsyncExitStack
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
-import time
 from typing import TYPE_CHECKING
 
 __version__ = '0.33.0'
 
 if TYPE_CHECKING:
     from types_aiobotocore_ec2 import EC2Client
+    from types_aiobotocore_ec2.type_defs import TagTypeDef as Ec2Tag
     from types_aiobotocore_efs import EFSClient
     from types_aiobotocore_fsx import FSxClient
     from types_aiobotocore_organizations import OrganizationsClient
     from types_aiobotocore_s3 import S3Client
     from types_aiobotocore_sts import STSClient
+    from aiobotocore.credentials import AioCredentials
 
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
@@ -34,6 +35,9 @@ BOLD = "\033[1m"
 
 try:
     import aiobotocore.session
+    import aiobotocore.config
+    import aiobotocore.credentials
+    from aiobotocore.session import AioSession
 except ImportError as err:
     print(
         f"{RED}Import error: {err}{RESET}\n"
@@ -155,16 +159,10 @@ logger.addHandler(handler)
 ######################
 
 class App:
-    _exit_stack: AsyncExitStack
-    current_account: str
-
-    # AWS clients
-    _ec2: 'EC2Client'
-    _efs: 'EFSClient'
-    _fsx: 'FSxClient'
+    _current_account: str
+    _session: 'AioSession'
     _org: 'OrganizationsClient'
-    _s3: 'S3Client'
-    _sts: 'STSClient'
+    _creds: 'AioCredentials'
 
     def __init__(self):
         self._exit_stack = AsyncExitStack()
@@ -173,35 +171,28 @@ class App:
         await self._exit_stack.__aexit__(exc_type, exc_value, traceback)
 
     async def __aenter__(self):
-        session = aiobotocore.session.get_session()
+        self._session = aiobotocore.session.get_session()
+        self._creds = await self._session.get_credentials()
 
-        def create_client(name):
-            return self._exit_stack.enter_async_context(session.create_client(name))
+        if not self._creds:
+            raise Exception("No credentials found. Please configure your AWS credentials.")
 
-        timer = time.perf_counter()
+        self._org = self._exit_stack.enter_async_context(self._session.create_client("organizations"))
+        sts = await self._exit_stack.enter_async_context(self._session.create_client("sts"))
 
-        self._sts = await create_client('sts')
-        self._org = await create_client('organizations')
-        self._s3  = await create_client('s3')
-        self._ec2 = await create_client('ec2')
-        self._efs = await create_client('efs')
-        self._fsx = await create_client('fsx')
+        identity = await sts.get_caller_identity()
 
-        logger.info(f"Client creation took {time.perf_counter() - timer:.2f} seconds")
-
-        identity = await self._sts.get_caller_identity()
-
-        self.current_account = identity['Account']
+        self._current_account = identity['Account']
         identity_arn = identity['Arn']
 
-        logger.info(f"Current account:  {BOLD}{self.current_account}{RESET}")
+        logger.info(f"Current account:  {BOLD}{self._current_account}{RESET}")
         logger.info(f"Current identity: {BOLD}{identity_arn}{RESET}")
 
         return self
 
     async def run(self):
-        accounts = await self.discover_accounts()
-        if not accounts:
+        accs = await self.discover_accounts()
+        if not accs:
             raise Exception("No accounts were selected for processing. Nothing to do.")
 
         regions = await self.discover_regions()
@@ -209,7 +200,83 @@ class App:
         if not regions:
             raise Exception("No regions were selected for processing. Nothing to do.")
 
-        logger.info("Starting inventory collection...")
+        logger.info(f"{GREEN}Starting inventory collection...{RESET}")
+
+        futs = [
+            self.collect_inventory_in_region(acc, region)
+            for acc in accs
+            for region in regions
+        ]
+
+        assets = [
+            asset
+            for assets in await asyncio.gather(*futs)
+            for asset in assets
+        ]
+
+        logger.info(
+            f"{GREEN}Inventory collection completed. "
+            f"{BOLD}{len(assets)}{RESET}{GREEN}assets collected.{RESET}"
+        )
+
+        if assets:
+            with open('inventory.csv', mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow([
+                    'Account',
+                    'Region',
+                    'Type',
+                    'Name',
+                    'ID', 'State', 'Data Size (GiB)'
+                ])
+                for asset in assets:
+                    writer.writerow([asset.account, asset.region, asset.type, asset.name, asset.id, asset.state, asset.data_size_gib])
+
+        logger.info(f"{GREEN}Inventory collection completed. {len(assets)} assets collected.{RESET}")
+
+
+
+
+    async def collect_inventory_in_region(self, account: str, region: str) -> list['Asset']:
+        logger.info(f"Processing {BOLD}{account}/{region}{RESET}")
+
+        session = await self.resolve_session(account, region)
+
+        async with InventoryInRegion(session) as ctx:
+            return await ctx.collect_inventory()
+
+    async def resolve_session(self, account: str, region: str) -> 'SelfAwareAioSession':
+        if account == self._current_account:
+            return SelfAwareAioSession(account, region, self._session)
+
+        # Looks like there is no official way in boto to bind the assume-role
+        # credentials provider with the session other than accessing the private
+        # _credentials field directly. This is very dumb, but it works.
+        # https://stackoverflow.com/a/66346765/9259330
+        session = AioSession(aws_access_key_id="", aws_secret_access_key="")
+
+        sts_session = AioSession(aws_access_key_id="", aws_secret_access_key="")
+        sts_session._credentials = self._creds
+
+        assume_role_config = {
+            "role_arn": f"arn:aws:iam::{account}:role/{args.assume_role}",
+            "role_session_name": "inventory-collector",
+        }
+
+        profile_name="main"
+
+        config = { profile_name: assume_role_config }
+
+        provider = aiobotocore.credentials.AioAssumeRoleProvider(
+            load_config=lambda: config,
+            client_creator=sts_session.create_client,
+            cache=dict,
+            profile_name=profile_name,
+        )
+
+        session._credentials = await provider.load()
+
+        return SelfAwareAioSession(account, region, session)
 
 
     async def discover_regions(self) -> list[str]:
@@ -246,7 +313,7 @@ class App:
         elif args.accounts:
             accs: list[str] = args.accounts
         else:
-            accs = [self.current_account]
+            accs = [self._current_account]
 
         if args.exclude_accounts:
             filtered_accs = [
@@ -287,6 +354,116 @@ class App:
         details.append(f"inactive: {BOLD}{inactive_accs}{RESET}")
 
         return accs
+
+@dataclass
+class SelfAwareAioSession:
+    account: str
+    region: str
+    inner: AioSession
+
+class InventoryInRegion:
+    _ec2: 'EC2Client'
+    _efs: 'EFSClient'
+    _fsx: 'FSxClient'
+    _s3: 'S3Client'
+
+    def __init__(self, session: SelfAwareAioSession):
+        self._exit_stack = AsyncExitStack()
+        self._session = session
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self._exit_stack.__aexit__(exc_type, exc_value, traceback)
+
+    async def __aenter__(self):
+        enter_async = self._exit_stack.enter_async_context
+        create_client = self._session.inner.create_client
+        region = self._session.region
+
+        self._ec2 = await enter_async(create_client("ec2", region_name=region))
+        self._efs = await enter_async(create_client("efs", region_name=region))
+        self._fsx = await enter_async(create_client("fsx", region_name=region))
+        self._s3 = await enter_async(create_client("s3", region_name=region))
+
+        return self
+
+    async def collect_inventory(self) -> list['Asset']:
+        return self.collect_inventory_ec2()
+
+    async def collect_inventory_ec2(self) -> list['Asset']:
+        def find_name_tag(tags: list['Ec2Tag']) -> str | None:
+            return next((tag['Value'] for tag in tags if tag['Key'] == 'Name'), None)
+
+
+        volumes = self._ec2.get_paginator('describe_volumes')
+        volumes = volumes.paginate(
+            Filters=[
+                {
+                    "Name": "status",
+                    "Values": ["available", "in-use"]
+                }
+            ]
+        )
+        volumes = [
+            Asset(
+                account=self._session.account,
+                region=self._session.region,
+                type='ec2:volume',
+                name=find_name_tag(volume.get('Tags', [])),
+                state=volume.get('State'),
+                data_size_gib=volume.get('Size')
+            )
+            async for page in volumes
+            for volume in page['Volumes']
+        ]
+
+        instances = self._ec2.get_paginator('describe_instances')
+        instances = instances.paginate(
+            Filters=[
+                {
+                    "Name": "instance-state-name",
+                    "Values": ["running", "stopping", "stopped"]
+                }
+            ]
+        )
+        instances = [
+            Asset(
+                account=self._session.account,
+                region=self._session.region,
+                type='ec2:instance',
+                name=find_name_tag(instance.get('Tags', [])),
+                state=instance.get('State', {}).get('Name'),
+                data_size_gib=sum(
+                    next(
+                        (
+                            volume.data_size_gib
+                            for volume in volumes if volume.id == volume_id
+                        ),
+                        0
+                    )
+                    for mapping in instance.get('BlockDeviceMappings', [])
+                    if (volume_id := mapping.get('Ebs', {}).get('VolumeId'))
+                )
+            )
+            async for page in instances
+            for instance in page['Reservations']
+            for instance in instance['Instances']
+        ]
+
+        return instances + volumes
+
+
+@dataclass
+class Asset:
+    account: str
+    region: str
+    type: str
+    name: str
+    id: str
+    state: str
+    # Size of the asset in GiB
+    data_size_gib: int
+
+
 
 async def main():
     try:
@@ -339,6 +516,6 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, on_cancel)
     signal.signal(signal.SIGTERM, on_cancel)
 
-    exit_code = asyncio.get_event_loop().run_until_complete(main())
+    exit_code = asyncio.run(main())
 
     sys.exit(exit_code)

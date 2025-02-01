@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 
 import argparse
-import asyncio
 import csv
 import logging
 import signal
 import sys
-from contextlib import AsyncExitStack
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 __version__ = "0.33.0"
 
@@ -31,17 +30,17 @@ RESET = "\033[0m"
 BOLD = "\033[1m"
 
 try:
-    import aiobotocore.session
-    import aiobotocore.config
-    import aiobotocore.credentials
-    from aiobotocore.session import AioSession
+    import botocore.session
+    import botocore.config
+    import botocore.credentials
+    from botocore.session import Session
     from tqdm import tqdm
     from tqdm.contrib.logging import logging_redirect_tqdm
 except ImportError as err:
     print(
         f"{RED}Import error: {err}{RESET}\n"
         "Install the dependencies with this command:\n"
-        f"{GREEN}pip3 install --upgrade aiobotocore tqdm{RESET}"
+        f"{GREEN}pip3 install --upgrade botocore boto3 tqdm{RESET}"
     )
     sys.exit(1)
 
@@ -65,7 +64,7 @@ auth_group.add_argument(
     "--sts-endpoint-region",
     help="AWS region to use for the STS endpoint (default: %(default)s). "
     "Required for accessing opt-in regions.",
-    default=aiobotocore.session.get_session().get_config_variable("region"),
+    default=botocore.session.get_session().get_config_variable("region"),
 )
 
 accs_group = arg_parser.add_argument_group(
@@ -112,7 +111,7 @@ regions_group.add_argument(
 arg_parser.add_argument(
     "--concurrency",
     type=int,
-    default=40,
+    default=20,
     help="Maximum number of concurrent API calls (default: %(default)s)",
 )
 arg_parser.add_argument(
@@ -174,7 +173,7 @@ handler.setFormatter(CustomFormatter())
 logger.addHandler(handler)
 
 # There are some noisy logs from this module. We provide better logging instead
-logging.getLogger("aiobotocore.credentials").setLevel(logging.ERROR)
+logging.getLogger("botocore.credentials").setLevel(logging.ERROR)
 
 
 ######################
@@ -184,34 +183,26 @@ logging.getLogger("aiobotocore.credentials").setLevel(logging.ERROR)
 
 class App:
     _current_account: str
-    _session: "AioSession"
+    _session: "Session"
     _org: "OrganizationsClient"
     _creds: "AioCredentials"
 
     def __init__(self):
-        self._exit_stack = AsyncExitStack()
-        self._semaphore = asyncio.Semaphore(args.concurrency)
+        logger.info(f"Using botocore v{botocore.__version__}")
 
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        await self._exit_stack.__aexit__(exc_type, exc_value, traceback)
-
-    async def __aenter__(self):
-        self._session = aiobotocore.session.get_session()
-        self._creds = await self._session.get_credentials()
+        self._session = botocore.session.get_session()
+        self._creds = self._session.get_credentials()
+        self._thread_pool = ThreadPoolExecutor(max_workers=args.concurrency)
 
         if not self._creds:
             raise Exception(
                 "No credentials found. Please configure your AWS credentials."
             )
 
-        self._org = await self._exit_stack.enter_async_context(
-            self._session.create_client("organizations")
-        )
-        sts = await self._exit_stack.enter_async_context(
-            self._session.create_client("sts")
-        )
+        self._org = self._session.create_client("organizations")
+        sts = self._session.create_client("sts")
 
-        identity = await sts.get_caller_identity()
+        identity = sts.get_caller_identity()
 
         self._current_account = identity["Account"]
         identity_arn = identity["Arn"]
@@ -219,10 +210,9 @@ class App:
         logger.info(f"Current account:  {BOLD}{self._current_account}{RESET}")
         logger.info(f"Current identity: {BOLD}{identity_arn}{RESET}")
 
-        return self
+    def run(self):
+        accounts = self.list_accounts_rich()
 
-    async def run(self):
-        accounts = await self.list_accounts_rich()
         if not accounts:
             raise Exception("No accounts were selected for processing. Nothing to do.")
 
@@ -235,14 +225,12 @@ class App:
 
         progress = InventoryProgress(regions)
 
-        futs = [
-            self.collect_inventory_in_account(progress, account) for account in accounts
-        ]
-
         with logging_redirect_tqdm([logger]):
-            assets = [
-                asset for assets in await asyncio.gather(*futs) for asset in assets
-            ]
+            batches = self._thread_pool.map(
+                lambda account: self.collect_inventory_in_account(progress, account),
+                accounts,
+            )
+            assets = [asset for assets in batches for asset in assets]
 
         logger.info(
             f"{GREEN}Inventory collection completed. "
@@ -270,33 +258,30 @@ class App:
                     )
                 )
 
-    async def collect_inventory_in_account(
+    def collect_inventory_in_account(
         self,
         progress: "InventoryProgress",
         account: "RichAccount",
-    ) -> list["Asset"]:
-        futs = (
-            self.collect_inventory_in_region(progress, account, region)
-            for region in account.regions
+    ) -> Iterable["Asset"]:
+        assets = self._thread_pool.map(
+            lambda region: self.collect_inventory_in_region(progress, account, region),
+            account.regions,
         )
 
-        return [asset for assets in await asyncio.gather(*futs) for asset in assets]
+        return (asset for assets in assets for asset in assets)
 
-    async def collect_inventory_in_region(
+    def collect_inventory_in_region(
         self,
         progress: "InventoryProgress",
         account: "RichAccount",
         region: str,
     ) -> list["Asset"]:
-        async with self._semaphore:
-            logger.debug(f"Processing {BOLD}{account}:{region}{RESET}")
+        logger.debug(f"Processing {BOLD}{account}:{region}{RESET}")
+        inventory = InventoryInRegion(progress, account, region).collect_inventory()
+        progress.regions.update(1)
+        return inventory
 
-            async with InventoryInRegion(progress, account, region) as ctx:
-                inventory = await ctx.collect_inventory()
-                progress.regions.update(1)
-                return inventory
-
-    def assume_role_session(self, account: str) -> "AioSession":
+    def assume_role_session(self, account: str) -> "Session":
         if account == self._current_account:
             return self._session
 
@@ -311,7 +296,7 @@ class App:
                 endpoint_url=endpoint_url, *args, **kwargs
             )
 
-        fetcher = aiobotocore.credentials.AioAssumeRoleCredentialFetcher(
+        fetcher = botocore.credentials.AssumeRoleCredentialFetcher(
             client_creator=client_creator,
             source_credentials=self._creds,
             role_arn=f"arn:aws:iam::{account}:role/{args.assume_role}",
@@ -320,28 +305,22 @@ class App:
             },
         )
 
-        assume_role_creds = aiobotocore.credentials.AioDeferredRefreshableCredentials(
+        assume_role_creds = botocore.credentials.DeferredRefreshableCredentials(
             method="assume-role", refresh_using=fetcher.fetch_credentials
         )
 
-        assume_role_session = AioSession()
+        assume_role_session = Session()
         assume_role_session._credentials = assume_role_creds
 
         return assume_role_session
 
-    async def enrich_account(
-        self, accounts_progress: tqdm, account: "BasicAccount"
-    ) -> Optional["RichAccount"]:
-        async with self._semaphore:
-            return await self.enrich_account_(accounts_progress, account)
-
-    async def enrich_account_(
+    def enrich_account(
         self, accounts_progress: tqdm, account: "BasicAccount"
     ) -> Optional["RichAccount"]:
         session = self.assume_role_session(account.id)
 
         try:
-            await (await session.get_credentials()).get_frozen_credentials()
+            session.get_credentials().get_frozen_credentials()
         except Exception as err:
             logger.warning(
                 f"[{account}] {BOLD}Authentication to the account failed{RESET}: {err}"
@@ -349,8 +328,7 @@ class App:
             return None
 
         try:
-            async with session.create_client("ec2") as ec2:
-                response = await ec2.describe_regions()
+            response = session.create_client("ec2").describe_regions()
         except Exception as err:
             logger.warning(
                 f"[{account}] {BOLD}ec2:DescribeRegions failed{RESET}: {err}"
@@ -378,10 +356,10 @@ class App:
             regions=sorted(regions),
         )
 
-    async def list_accounts_rich(self) -> list["RichAccount"]:
+    def list_accounts_rich(self) -> list["RichAccount"]:
         details = []
 
-        all_accounts = await self.list_accounts_basic(details)
+        all_accounts = self.list_accounts_basic(details)
 
         if args.all_accounts:
             accounts = all_accounts
@@ -423,10 +401,12 @@ class App:
             unit="account",
         )
 
-        futs = (self.enrich_account(accounts_progress, account) for account in accounts)
-
-        with logging_redirect_tqdm([logger]):
-            rich_accs = [account for account in await asyncio.gather(*futs) if account]
+        # with logging_redirect_tqdm([logger]):
+        rich_accs = self._thread_pool.map(
+            lambda account: self.enrich_account(accounts_progress, account),
+            accounts,
+        )
+        rich_accs = [account for account in rich_accs if account]
 
         accounts_progress.clear()
 
@@ -443,10 +423,10 @@ class App:
 
         return rich_accs
 
-    async def list_accounts_basic(self, details: list[str]) -> list["BasicAccount"]:
+    def list_accounts_basic(self, details: list[str]) -> list["BasicAccount"]:
         accounts = [
             account
-            async for page in self._org.get_paginator("list_accounts").paginate()
+            for page in self._org.get_paginator("list_accounts").paginate()
             for account in page["Accounts"]
         ]
 
@@ -477,30 +457,22 @@ class InventoryInRegion:
     def __init__(
         self, progress: "InventoryProgress", account: "RichAccount", region: str
     ):
-        self._exit_stack = AsyncExitStack()
         self._account = account
         self._region = region
         self._progress = progress
 
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        await self._exit_stack.__aexit__(exc_type, exc_value, traceback)
-
-    async def __aenter__(self):
-        enter_async = self._exit_stack.enter_async_context
         create_client = self._account.session.create_client
         region = self._region
 
-        self._ec2 = await enter_async(create_client("ec2", region_name=region))
-        self._efs = await enter_async(create_client("efs", region_name=region))
-        self._fsx = await enter_async(create_client("fsx", region_name=region))
-        self._s3 = await enter_async(create_client("s3", region_name=region))
+        self._ec2 = create_client("ec2", region_name=region)
+        self._efs = create_client("efs", region_name=region)
+        self._fsx = create_client("fsx", region_name=region)
+        self._s3 = create_client("s3", region_name=region)
 
-        return self
+    def collect_inventory(self) -> list["Asset"]:
+        return self.collect_inventory_ec2()
 
-    async def collect_inventory(self) -> list["Asset"]:
-        return await self.collect_inventory_ec2()
-
-    async def collect_inventory_ec2(self) -> list["Asset"]:
+    def collect_inventory_ec2(self) -> list["Asset"]:
         def find_name_tag(tags: list["Ec2Tag"]) -> str | None:
             return next((tag["Value"] for tag in tags if tag["Key"] == "Name"), None)
 
@@ -520,7 +492,7 @@ class InventoryInRegion:
                     state=volume.get("State"),
                     data_size_gib=volume.get("Size"),
                 )
-                async for page in volumes
+                for page in volumes
                 for volume in page["Volumes"]
             ]
         except Exception as err:
@@ -561,7 +533,7 @@ class InventoryInRegion:
                         if (volume_id := mapping.get("Ebs", {}).get("VolumeId"))
                     ),
                 )
-                async for page in instances
+                for page in instances
                 for instance in page["Reservations"]
                 for instance in instance["Instances"]
             ]
@@ -595,7 +567,7 @@ class InventoryInRegion:
             id=id,
             name=name,
             state=state,
-            data_size_gib=0,
+            data_size_gib=data_size_gib,
         )
 
 
@@ -631,7 +603,7 @@ def progress_bar(unit: str, total: int, leave=False) -> tqdm:
             f"{BLUE}[Elapsed: {{elapsed}} ETA: {{remaining}}]{RESET} "
             f"{GREY}[{{rate_fmt}}]{RESET} "
             f"{GREEN}{BOLD}{{percentage:3.0f}}%{RESET} {{bar}}"
-        )
+        ),
     )
 
 
@@ -648,7 +620,7 @@ class BasicAccount:
 class RichAccount:
     id: str
     name: Optional[str]
-    session: "AioSession"
+    session: "Session"
     regions: list[str]
 
     def __str__(self):
@@ -668,10 +640,9 @@ class Asset:
     data_size_gib: Optional[int]
 
 
-async def main():
+def main():
     try:
-        async with App() as app:
-            await app.run()
+        App().run()
     except Exception as err:
         logger.exception(err)
         return 1
@@ -686,10 +657,9 @@ def on_cancel(sig_number: int, _frame):
     )
     sys.exit(1)
 
+
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, on_cancel)
     signal.signal(signal.SIGTERM, on_cancel)
 
-    exit_code = asyncio.run(main())
-
-    sys.exit(exit_code)
+    sys.exit(main())

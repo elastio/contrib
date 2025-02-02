@@ -9,16 +9,10 @@ from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Iterable, Optional
 from concurrent.futures import ThreadPoolExecutor
 
-__version__ = "0.33.0"
-
 if TYPE_CHECKING:
-    from types_aiobotocore_ec2 import EC2Client
-    from types_aiobotocore_ec2.type_defs import TagTypeDef as Ec2Tag
-    from types_aiobotocore_efs import EFSClient
-    from types_aiobotocore_fsx import FSxClient
-    from types_aiobotocore_organizations import OrganizationsClient
-    from types_aiobotocore_s3 import S3Client
-    from aiobotocore.credentials import AioCredentials
+    from mypy_boto3_ec2.type_defs import TagTypeDef as Ec2Tag
+
+__version__ = "0.33.0"
 
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
@@ -182,11 +176,6 @@ logging.getLogger("botocore.credentials").setLevel(logging.ERROR)
 
 
 class App:
-    _current_account: str
-    _session: "Session"
-    _org: "OrganizationsClient"
-    _creds: "AioCredentials"
-
     def __init__(self):
         logger.info(f"Using botocore v{botocore.__version__}")
 
@@ -263,8 +252,9 @@ class App:
         progress: "InventoryProgress",
         account: "RichAccount",
     ) -> Iterable["Asset"]:
+        session = self.assume_role_session(account.id)
         assets = self._thread_pool.map(
-            lambda region: self.collect_inventory_in_region(progress, account, region),
+            lambda region: self.collect_inventory_in_region(progress, session, account, region),
             account.regions,
         )
 
@@ -273,11 +263,12 @@ class App:
     def collect_inventory_in_region(
         self,
         progress: "InventoryProgress",
+        session: "Session",
         account: "RichAccount",
         region: str,
     ) -> list["Asset"]:
         logger.debug(f"Processing {BOLD}{account}:{region}{RESET}")
-        inventory = InventoryInRegion(progress, account, region).collect_inventory()
+        inventory = InventoryInRegion(progress, session, account, region).collect_inventory()
         progress.regions.update(1)
         return inventory
 
@@ -352,7 +343,6 @@ class App:
         return RichAccount(
             id=account.id,
             name=account.name,
-            session=session,
             regions=sorted(regions),
         )
 
@@ -449,19 +439,14 @@ class App:
 
 
 class InventoryInRegion:
-    _ec2: "EC2Client"
-    _efs: "EFSClient"
-    _fsx: "FSxClient"
-    _s3: "S3Client"
-
     def __init__(
-        self, progress: "InventoryProgress", account: "RichAccount", region: str
+        self, progress: "InventoryProgress", session: "Session", account: "RichAccount", region: str
     ):
         self._account = account
         self._region = region
         self._progress = progress
 
-        create_client = self._account.session.create_client
+        create_client = session.create_client
         region = self._region
 
         self._ec2 = create_client("ec2", region_name=region)
@@ -620,7 +605,6 @@ class BasicAccount:
 class RichAccount:
     id: str
     name: Optional[str]
-    session: "Session"
     regions: list[str]
 
     def __str__(self):

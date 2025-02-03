@@ -252,7 +252,11 @@ class App:
         progress: "InventoryProgress",
         account: "RichAccount",
     ) -> Iterable["Asset"]:
+        # We could store the `session` in the `RichAccount` object, but it would
+        # would lead a memory leak in `botocore` preventing this script from being
+        # able to run in Cloudshell: https://github.com/boto/botocore/issues/3366
         session = self.assume_role_session(account.id)
+
         assets = self._thread_pool.map(
             lambda region: self.collect_inventory_in_region(progress, session, account, region),
             account.regions,

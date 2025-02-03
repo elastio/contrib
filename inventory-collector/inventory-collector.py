@@ -3,6 +3,8 @@
 import argparse
 import csv
 import logging
+import os
+import platform
 import signal
 import sys
 from dataclasses import dataclass, fields
@@ -17,7 +19,7 @@ __version__ = "0.33.0"
 GREEN = "\033[0;32m"
 RED = "\033[0;31m"
 YELLOW = "\033[0;33m"
-GREY = "\033[0;37m"
+PURPLE = "\033[0;35m"
 BLUE = "\033[0;34m"
 
 RESET = "\033[0m"
@@ -105,7 +107,7 @@ regions_group.add_argument(
 arg_parser.add_argument(
     "--concurrency",
     type=int,
-    default=40,
+    default=max(20, os.cpu_count() or 1),
     help="Maximum number of concurrent API calls (default: %(default)s)",
 )
 arg_parser.add_argument(
@@ -144,7 +146,7 @@ class CustomFormatter(logging.Formatter):
 
     def __init__(self):
         super().__init__(
-            f"{GREY}%(asctime)s.%(msecs)03d UTC{RESET} {GREEN}%(levelname)s{RESET} "
+            f"{PURPLE}%(asctime)s.%(msecs)03d UTC{RESET} {GREEN}%(levelname)s{RESET} "
             f"{BOLD}%(name)s{RESET}: %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
@@ -177,7 +179,9 @@ logging.getLogger("botocore.credentials").setLevel(logging.ERROR)
 
 class App:
     def __init__(self):
-        logger.info(f"Using botocore v{botocore.__version__}")
+        logger.info(
+            f"Using botocore v{botocore.__version__}, Python v{platform.python_version()}"
+        )
 
         self._session = botocore.session.get_session()
         self._creds = self._session.get_credentials()
@@ -203,16 +207,19 @@ class App:
         accounts = self.list_accounts_rich()
 
         if not accounts:
-            raise Exception("No accounts were selected for processing. Nothing to do.")
+            raise Exception("There are no accounts to process. Nothing to do.")
 
-        regions = sum(len(account.regions) for account in accounts)
+        account_regions = sum(len(account.regions) for account in accounts)
 
-        if regions == 0:
-            raise Exception("No regions were selected for processing. Nothing to do.")
+        if account_regions == 0:
+            raise Exception("There are no regions to process. Nothing to do.")
 
-        logger.info(f"{GREEN}Starting inventory collection...{RESET}")
+        logger.info(
+            f"{GREEN}Listing assets in {BOLD}{account_regions}{RESET} "
+            f"{GREEN}account-regions (concurrency: {args.concurrency})...{RESET}"
+        )
 
-        progress = InventoryProgress(regions)
+        progress = InventoryProgress(account_regions)
 
         with logging_redirect_tqdm([logger]):
             batches = self._thread_pool.map(
@@ -322,7 +329,8 @@ class App:
             session.get_credentials().get_frozen_credentials()
         except Exception as err:
             logger.warning(
-                f"[{account}] {BOLD}Authentication to the account failed{RESET}: {err}"
+                f"[{account}] {YELLOW}{BOLD}Authentication to the account failed"
+                f"{RESET}{YELLOW}: {err}{RESET}"
             )
             return None
 
@@ -330,7 +338,8 @@ class App:
             response = session.create_client("ec2").describe_regions()
         except Exception as err:
             logger.warning(
-                f"[{account}] {BOLD}ec2:DescribeRegions failed{RESET}: {err}"
+                f"[{account}] {YELLOW}{BOLD}ec2:DescribeRegions failed"
+                f"{RESET}{YELLOW}: {err}{RESET}"
             )
             return None
 
@@ -395,21 +404,22 @@ class App:
                 details.append(f"excluded: {BOLD}{excluded}{RESET}")
 
         logger.info(
-            f"Listing regions in {BOLD}{len(accounts)}{RESET} selected accounts..."
+            f"{GREEN}Listing regions in {BOLD}{len(accounts)}{RESET} "
+            f"{GREEN}selected accounts (concurrency: {args.concurrency})...{RESET}"
         )
 
         accounts_progress = progress_bar(
             total=len(accounts),
             unit="account",
-            desc="(Listing regions)",
+            desc="(listing regions)",
         )
 
-        # with logging_redirect_tqdm([logger]):
-        rich_accs = self._thread_pool.map(
-            lambda account: self.enrich_account(accounts_progress, account),
-            accounts,
-        )
-        rich_accs = [account for account in rich_accs if account]
+        with logging_redirect_tqdm([logger]):
+            rich_accs = self._thread_pool.map(
+                lambda account: self.enrich_account(accounts_progress, account),
+                accounts,
+            )
+            rich_accs = [account for account in rich_accs if account]
 
         accounts_progress.clear()
 
@@ -440,8 +450,8 @@ class App:
                 raise err
 
             logger.warning(
-                "organizations:ListAccounts failed. There won't be account name "
-                f"information in the inventory: {err}"
+                f"{YELLOW}{BOLD}organizations:ListAccounts failed. There won't be account name "
+                f"information in the inventory{RESET}{YELLOW}: {err}{RESET}"
             )
             return None
 
@@ -495,7 +505,7 @@ class InventoryInRegion:
             Filters=[{"Name": "status", "Values": ["available", "in-use"]}]
         )
 
-        prefix = f"[{self._account}:{self._region}]".ljust(29)
+        prefix = f"{YELLOW}[{self._account}:{self._region}]".ljust(29)
 
         try:
             volumes = [
@@ -510,7 +520,7 @@ class InventoryInRegion:
                 for volume in page["Volumes"]
             ]
         except Exception as err:
-            logger.warning(f"{prefix} ec2:DescribeVolumes failed: {err}")
+            logger.warning(f"{prefix} ec2:DescribeVolumes failed: {err}{RESET}")
             volumes = []
 
         logger.debug(
@@ -552,7 +562,7 @@ class InventoryInRegion:
                 for instance in instance["Instances"]
             ]
         except Exception as err:
-            logger.warning(f"{prefix} ec2:DescribeInstances failed: {err}")
+            logger.warning(f"{prefix} ec2:DescribeInstances failed: {err}{RESET}")
             instances = []
 
         logger.debug(
@@ -593,8 +603,8 @@ class InventoryProgress:
     def __init__(self, total_regions: int):
         self.regions = progress_bar(
             total=total_regions,
-            desc="(Listing assets)",
-            unit="region",
+            desc="(listing assets)",
+            unit="account-region",
             leave=True,
         )
         self.assets = tqdm(
@@ -616,8 +626,8 @@ def progress_bar(unit: str, total: int, desc: str, leave=False) -> tqdm:
         desc=desc,
         bar_format=(
             f"{GREEN}{BOLD}{{n_fmt}} / {{total_fmt}} {{unit}}s{RESET} "
-            f"{BLUE}[Elapsed: {{elapsed}} ETA: {{remaining}}]{RESET} "
-            f"{GREY}[{{rate_fmt}}]{RESET} "
+            f"{BLUE}[Elapsed: {{elapsed}}, ETA: {{remaining}}]{RESET} "
+            f"{PURPLE}[{{rate_fmt}}]{RESET} "
             f"{GREEN}{BOLD}{{desc}}: {{percentage:3.0f}}%{RESET} {{bar}}"
         ),
     )

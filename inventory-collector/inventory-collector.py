@@ -105,7 +105,7 @@ regions_group.add_argument(
 arg_parser.add_argument(
     "--concurrency",
     type=int,
-    default=20,
+    default=40,
     help="Maximum number of concurrent API calls (default: %(default)s)",
 )
 arg_parser.add_argument(
@@ -258,7 +258,9 @@ class App:
         session = self.assume_role_session(account.id)
 
         assets = self._thread_pool.map(
-            lambda region: self.collect_inventory_in_region(progress, session, account, region),
+            lambda region: self.collect_inventory_in_region(
+                progress, session, account, region
+            ),
             account.regions,
         )
 
@@ -272,7 +274,9 @@ class App:
         region: str,
     ) -> list["Asset"]:
         logger.debug(f"Processing {BOLD}{account}:{region}{RESET}")
-        inventory = InventoryInRegion(progress, session, account, region).collect_inventory()
+        inventory = InventoryInRegion(
+            progress, session, account, region
+        ).collect_inventory()
         progress.regions.update(1)
         return inventory
 
@@ -353,24 +357,28 @@ class App:
     def list_accounts_rich(self) -> list["RichAccount"]:
         details = []
 
-        all_accounts = self.list_accounts_basic(details)
+        listed_accounts = self.list_accounts_basic(details)
 
         if args.all_accounts:
-            accounts = all_accounts
-        elif args.accounts:
-            accounts = [
-                account for account in all_accounts if account.id in args.accounts
-            ]
+            accounts = listed_accounts
         else:
-            account = next(
-                (
+            accounts = args.accounts if args.accounts else [self._current_account]
+
+            if listed_accounts is None:
+                # We couldn't list accounts, so we can neither filter out non-existing
+                # ones nor get their names. We will just use the IDs.
+                accounts = [BasicAccount(id=account, name=None) for account in accounts]
+            else:
+                accounts = [
                     account
-                    for account in all_accounts
-                    if account.id == self._current_account
-                ),
-                None,
-            )
-            accounts = [account] if account else []
+                    for account_id in accounts
+                    if (
+                        account := next(
+                            (acc for acc in listed_accounts if acc.id == account_id),
+                            None,
+                        )
+                    )
+                ]
 
         if args.exclude_accounts:
             filtered_accs = [
@@ -387,12 +395,13 @@ class App:
                 details.append(f"excluded: {BOLD}{excluded}{RESET}")
 
         logger.info(
-            f"Discovering regions in {BOLD}{len(accounts)}{RESET} selected accounts..."
+            f"Listing regions in {BOLD}{len(accounts)}{RESET} selected accounts..."
         )
 
         accounts_progress = progress_bar(
             total=len(accounts),
             unit="account",
+            desc="(Listing regions)",
         )
 
         # with logging_redirect_tqdm([logger]):
@@ -417,12 +426,24 @@ class App:
 
         return rich_accs
 
-    def list_accounts_basic(self, details: list[str]) -> list["BasicAccount"]:
-        accounts = [
-            account
-            for page in self._org.get_paginator("list_accounts").paginate()
-            for account in page["Accounts"]
-        ]
+    def list_accounts_basic(self, details: list[str]) -> Optional[list["BasicAccount"]]:
+        try:
+            accounts = [
+                account
+                for page in self._org.get_paginator("list_accounts").paginate()
+                for account in page["Accounts"]
+            ]
+        except Exception as err:
+            # Rethrow the error, because we must have access to ListAccounts API
+            # to be able to collect inventory data from all of them.
+            if args.all_accounts:
+                raise err
+
+            logger.warning(
+                "organizations:ListAccounts failed. There won't be account name "
+                f"information in the inventory: {err}"
+            )
+            return None
 
         total_accounts = len(accounts)
 
@@ -444,7 +465,11 @@ class App:
 
 class InventoryInRegion:
     def __init__(
-        self, progress: "InventoryProgress", session: "Session", account: "RichAccount", region: str
+        self,
+        progress: "InventoryProgress",
+        session: "Session",
+        account: "RichAccount",
+        region: str,
     ):
         self._account = account
         self._region = region
@@ -462,7 +487,7 @@ class InventoryInRegion:
         return self.collect_inventory_ec2()
 
     def collect_inventory_ec2(self) -> list["Asset"]:
-        def find_name_tag(tags: list["Ec2Tag"]) -> str | None:
+        def find_name_tag(tags: list["Ec2Tag"]) -> Optional[str]:
             return next((tag["Value"] for tag in tags if tag["Key"] == "Name"), None)
 
         volumes = self._ec2.get_paginator("describe_volumes")
@@ -568,6 +593,7 @@ class InventoryProgress:
     def __init__(self, total_regions: int):
         self.regions = progress_bar(
             total=total_regions,
+            desc="(Listing assets)",
             unit="region",
             leave=True,
         )
@@ -581,17 +607,18 @@ class InventoryProgress:
         )
 
 
-def progress_bar(unit: str, total: int, leave=False) -> tqdm:
+def progress_bar(unit: str, total: int, desc: str, leave=False) -> tqdm:
     return tqdm(
         total=total,
         unit=unit,
         disable=args.no_progress,
         leave=leave,
+        desc=desc,
         bar_format=(
             f"{GREEN}{BOLD}{{n_fmt}} / {{total_fmt}} {{unit}}s{RESET} "
             f"{BLUE}[Elapsed: {{elapsed}} ETA: {{remaining}}]{RESET} "
             f"{GREY}[{{rate_fmt}}]{RESET} "
-            f"{GREEN}{BOLD}{{percentage:3.0f}}%{RESET} {{bar}}"
+            f"{GREEN}{BOLD}{{desc}}: {{percentage:3.0f}}%{RESET} {{bar}}"
         ),
     )
 

@@ -596,7 +596,7 @@ class ListAssetsInRegion:
         self._region = region
         self._progress = progress
 
-        self._prefix = f"{BLUE}[{account}:{region}]{RESET}".ljust(29)
+        self._prefix = f"{BLUE}[{account}:{region.name}]{RESET}".ljust(29)
         self._log_api_error = api_error_logger(self._prefix)
 
         self._cloudwatch = session.client("cloudwatch", region_name=region.name)

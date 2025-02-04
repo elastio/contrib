@@ -14,9 +14,8 @@ from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from datetime import datetime, timedelta
 
-if TYPE_CHECKING:
-    from mypy_boto3_cloudwatch.type_defs import MetricDataQueryTypeDef
-
+# The minor version should coincide with the currently released version of Elastio
+# to simplify the reasoning of what types of assets this script supports listing.
 __version__ = "0.33.0"
 
 GREEN = "\033[0;32m"
@@ -261,9 +260,11 @@ class App:
             (asset for assets in batches for asset in assets),
             key=lambda asset: (
                 asset.type,
+                asset.account_name or "",
                 asset.account_id,
-                asset.region or "",
+                asset.region,
                 asset.name or "",
+                asset.size or 0,
             ),
         )
 
@@ -300,7 +301,7 @@ class App:
         if account == self._current_account:
             return default_session
 
-        # We provide means to override the STS endpoint to usee a regional one
+        # We provide means to override the STS endpoint to use a regional one
         # because some newer AWS regions require using a regional endpoint,
         # otherwise credentials returned by AssumeRole would result in an error
         # something like "could not validate the provided access credentials".
@@ -325,7 +326,7 @@ class App:
         assume_role_session = botocore.session.Session()
 
         # Looks like there is no official way in boto to bind the assume-role
-        # credentials provider with the session other than accessing the private
+        # credentials provider to the session other than accessing the private
         # _credentials field directly. This is very dumb, but it works.
         # https://stackoverflow.com/a/66346765/9259330
         # Note on a potentially related memory leak that we work around:
@@ -532,14 +533,14 @@ class App:
         # would lead a memory leak in `botocore` preventing this script from being
         # able to run in Cloudshell: https://github.com/boto/botocore/issues/3366
         session = self.assume_role_session(account.id)
-        assets = self._sub_accounts_thread_pool.map(
+        batches = self._sub_accounts_thread_pool.map(
             lambda region: self.list_assets_in_region(
                 progress, account, session, region
             ),
             account.regions.values(),
         )
 
-        return (asset for assets in assets for asset in assets)
+        return (asset for assets in batches for asset in assets)
 
     def list_assets_in_region(
         self,
@@ -570,8 +571,8 @@ class AssetType(str, Enum):
 @dataclass
 class Asset:
     type: str
-    account_id: str
     account_name: Optional[str]
+    account_id: str
     region: str
     name: Optional[str]
     id: str
@@ -615,11 +616,7 @@ class ListAssetsInRegion:
             self.list_fsx_ontap_volumes(),
         )
 
-        return [
-            asset
-            for assets in assets
-            for asset in assets
-        ]
+        return [asset for assets in assets for asset in assets]
 
     def asset(
         self,
@@ -705,6 +702,11 @@ class ListAssetsInRegion:
             return []
 
     def enrich_s3_buckets(self) -> list["Asset"]:
+        if TYPE_CHECKING:
+            from mypy_boto3_cloudwatch.type_defs import (
+                MetricDataResultTypeDef,
+            )
+
         if not self._region.s3_buckets:
             return []
 
@@ -712,9 +714,13 @@ class ListAssetsInRegion:
         # > These storage metrics for Amazon S3 are reported once per day.
         #
         # However, according to @Veetaha's experience looking at CloudWatch for these
-        # metrics, there was a gap of ~1.5 day. We set the lag to 2.5 days to be safe.
+        # metrics, there may be a much larger delay. The theory is that S3 doesn't report
+        # storage metrics if there is no write activity in the bucket for some time.
+        #
+        # To be safe we use a big range here, but it's not that expensive since
+        # we'll have only at most one data point per day.
         end_time = datetime.now()
-        start_time = end_time - timedelta(days=2.5)
+        start_time = end_time - timedelta(days=7)
 
         queries = (
             query
@@ -759,7 +765,7 @@ class ListAssetsInRegion:
 
         query_chunks = chunks(queries, 500)
 
-        results: list[list[MetricDataQueryTypeDef]] = []
+        results: list[list["MetricDataResultTypeDef"]] = []
 
         for queries in query_chunks:
             try:
@@ -769,15 +775,12 @@ class ListAssetsInRegion:
                     ScanBy="TimestampDescending",
                     MetricDataQueries=queries,
                 )
-
-                metrics = response["MetricDataResults"]
-                messages = response["Messages"]
             except Exception as err:
-                self._log_api_error(
-                    f"{self._prefix} cloudwatch:GetMetricData failed: {err}{RESET}"
-                )
-                metrics = []
-                messages = []
+                self._log_api_error("cloudwatch:GetMetricData", err)
+                response = {}
+
+            metrics = response.get("MetricDataResults", [])
+            messages = response.get("Messages", [])
 
             for message in messages:
                 logger.warning(
@@ -786,12 +789,11 @@ class ListAssetsInRegion:
                 )
 
             for metric in metrics:
-                if messages := metric.get("Messages"):
-                    for message in messages:
-                        logger.warning(
-                            f"{self._prefix} Got cloudwatch:GetMetricData message for "
-                            f"{metric.get('Id')} S3 metric: {message.get('Code')}: {message.get('Value')}"
-                        )
+                for message in metric.get("Messages", []):
+                    logger.warning(
+                        f"{self._prefix} Got cloudwatch:GetMetricData message for "
+                        f"{metric.get('Label')} S3 metric: {message.get('Code')}: {message.get('Value')}"
+                    )
 
                 if (status := metric.get("StatusCode")) and status not in (
                     "Complete",
@@ -799,10 +801,10 @@ class ListAssetsInRegion:
                 ):
                     logger.warning(
                         f"{self._prefix} Got cloudwatch:GetMetricData status {status} "
-                        f"for {metric.get('Id')} S3 metric"
+                        f"for {metric.get('Label')} S3 metric"
                     )
 
-                results.append(metrics)
+            results.append(metrics)
 
         assets = [
             self.asset(
@@ -848,7 +850,6 @@ class ListAssetsInRegion:
                     name=find_name_tag(fs.get("Tags")),
                     state=state,
                     size=fs.get("SizeInBytes", {}).get("Value"),
-
                     # There are no metrics about files count on an EFS filesystem
                     # in Cloudwatch, and we can't afford mounting the volumes
                     # to count the files, so we just skip this metric.
@@ -874,7 +875,6 @@ class ListAssetsInRegion:
                     name=volume.get("Name"),
                     state=state,
                     size=volume.get("OntapConfiguration", {}).get("SizeInBytes"),
-
                     # There are no metrics about files count on an FSX ONTAP volume
                     # in Cloudwatch, and we can't afford mounting the volumes
                     # to count the files, so we just skip this metric.

@@ -23,6 +23,7 @@ jobs:
       aws-backup-elastio-integration: "${{ steps.filter.outputs.aws-backup-elastio-integration }}"
       elastio-s3-changelog: "${{ steps.filter.outputs.elastio-s3-changelog }}"
       elastio-nat-provision-lambda: "${{ steps.filter.outputs.elastio-nat-provision-lambda }}"
+      inventory-collector: "${{ steps.filter.outputs.inventory-collector }}"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -39,6 +40,8 @@ jobs:
               - 'elastio-s3-changelog/**'
             elastio-nat-provision-lambda:
               - 'elastio-nat-provision-lambda/**'
+            inventory-collector:
+              - 'inventory-collector/**'
 
   typos:
     runs-on: ubuntu-latest
@@ -113,3 +116,23 @@ jobs:
           role-to-assume: ${{ vars.aws_elastio_prod_artifacts_contrib_role_arn }}
 
       - run: cd elastio-nat-provision-lambda && ./upload.sh
+
+  inventory-collector:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' && (
+        needs.changes.outputs.inventory-collector == 'true' ||
+        needs.changes.outputs.ci == 'true'
+      )
+    steps:
+      - run: pip install -r requirements.txt
+        working-directory: inventory-collector
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.aws_elastio_ci_role_arn }}
+
+      - run: ./run.sh
+        working-directory: inventory-collector

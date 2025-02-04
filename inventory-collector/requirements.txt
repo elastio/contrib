@@ -4,3 +4,6 @@ boto3-stubs[cloudwatch,ec2,efs,fsx,organizations,s3,sts]==1.36.11
 boto3==1.36.11
 
 tqdm==4.67.1
+types-tqdm==4.67.0.20241221
+
+mypy==1.14.1

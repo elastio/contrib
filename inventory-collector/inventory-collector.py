@@ -9,10 +9,14 @@ import platform
 import signal
 import sys
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Iterable, Iterator, Optional, TypeVar
+from typing import TYPE_CHECKING, Iterable, Optional, TypeVar
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from datetime import datetime, timedelta
+
+if TYPE_CHECKING:
+    from mypy_boto3_organizations.type_defs import AccountTypeDef
+    from mypy_boto3_organizations.literals import AccountStatusType
 
 # The minor version should coincide with the currently released version of Elastio
 # to simplify the reasoning of what types of assets this script supports listing.
@@ -77,7 +81,7 @@ accs_exclusive_group = accs_group.add_mutually_exclusive_group()
 accs_exclusive_group.add_argument(
     "--accounts",
     nargs="+",
-    help="Space-separated list of AWS account IDs to collect inventory from",
+    help="Space-separated list of account IDs to collect inventory from",
 )
 
 accs_exclusive_group.add_argument(
@@ -86,10 +90,16 @@ accs_exclusive_group.add_argument(
     help="Discover all accounts in the organization, and collect inventory from all of them",
 )
 
+accs_exclusive_group.add_argument(
+    "--parent",
+    help="ID of the parent root or org unit (OU). All accounts in this subtree "
+    "and its nested will be processed",
+)
+
 accs_group.add_argument(
     "--exclude-accounts",
     nargs="+",
-    help="Space-separated list of AWS account IDs to exclude from the inventory collection",
+    help="Space-separated list of account IDs to exclude from the inventory collection",
 )
 
 regions_group = arg_parser.add_argument_group(
@@ -286,8 +296,8 @@ class App:
                 writer.writerow(
                     (
                         asset.type,
-                        asset.account_id,
                         asset.account_name,
+                        asset.account_id,
                         asset.region,
                         asset.name,
                         asset.id,
@@ -308,7 +318,7 @@ class App:
         endpoint_url = f"https://sts.{args.sts_endpoint_region}.amazonaws.com"
 
         def client_creator(*args, **kwargs):
-            return default_session.client(endpoint_url=endpoint_url, *args, **kwargs)
+            return default_session.client(endpoint_url=endpoint_url, *args, **kwargs)  # type: ignore[call-overload]
 
         fetcher = botocore.credentials.AssumeRoleCredentialFetcher(
             client_creator=client_creator,
@@ -331,7 +341,7 @@ class App:
         # https://stackoverflow.com/a/66346765/9259330
         # Note on a potentially related memory leak that we work around:
         # https://github.com/boto/botocore/issues/3366
-        assume_role_session._credentials = assume_role_creds
+        assume_role_session._credentials = assume_role_creds  # type: ignore[attr-defined]
 
         return Session(botocore_session=assume_role_session)
 
@@ -341,7 +351,12 @@ class App:
         log_api_err = api_error_logger(f"{BLUE}[{account.id}]{RESET}")
 
         try:
-            session.get_credentials().get_frozen_credentials()
+            creds = session.get_credentials()
+            if creds is None:
+                logger.error(f"Couldn't get credentials for the account {account.id}")
+                return None
+
+            creds.get_frozen_credentials()
         except Exception as err:
             log_api_err("Authentication to the account", err)
             return None
@@ -376,7 +391,9 @@ class App:
             log_api_err("s3:ListBuckets", err)
             s3_buckets = []
 
-        regions = {region: RichRegion(name=region, s3_buckets=[]) for region in regions}
+        regions_map = {
+            region: RichRegion(name=region, s3_buckets=[]) for region in regions
+        }
 
         def get_bucket_region(bucket: str):
             try:
@@ -384,7 +401,7 @@ class App:
             except botocore.exceptions.ClientError as err:
                 # We can get the region from the response headers even if
                 # we don't have access to calling HeadBucket
-                response = err.response
+                response = err.response  # type: ignore[assignment]
             except Exception as err:
                 log_api_err("s3:HeadBucket", err)
                 return
@@ -402,8 +419,8 @@ class App:
                 )
                 return
 
-            if region := regions.get(region):
-                region.s3_buckets.append(bucket)
+            if rich_region := regions_map.get(region):
+                rich_region.s3_buckets.append(bucket)
 
         self._sub_accounts_thread_pool.map(
             get_bucket_region,
@@ -413,13 +430,39 @@ class App:
         return RichAccount(
             id=account.id,
             name=account.name,
-            regions=regions,
+            regions=regions_map,
         )
 
-    def list_accounts_basic(self, details: list[str]) -> Optional[list["BasicAccount"]]:
+    def list_accounts_tree(self, parent: str) -> list["BasicAccount"]:
+        """
+        Lists all AWS accounts in the OU by recursively traversing the OU tree.
+        """
+
+        accounts_paginator = self._org.get_paginator("list_accounts_for_parent")
+
+        accounts = [
+            BasicAccount(account)
+            for page in accounts_paginator.paginate(ParentId=parent)
+            for account in page["Accounts"]
+        ]
+
+        ous_paginator = self._org.get_paginator("list_organizational_units_for_parent")
+
+        ous = [
+            ou["Id"]
+            for page in ous_paginator.paginate(ParentId=parent)
+            for ou in page["OrganizationalUnits"]
+        ]
+
+        for ou in ous:
+            accounts.extend(self.list_accounts_tree(ou))
+
+        return accounts
+
+    def list_accounts_basic(self) -> Optional[list["BasicAccount"]]:
         try:
-            accounts = [
-                account
+            return [
+                BasicAccount(account)
                 for page in self._org.get_paginator("list_accounts").paginate()
                 for account in page["Accounts"]
             ]
@@ -435,48 +478,51 @@ class App:
             )
             return None
 
-        total_accounts = len(accounts)
-
-        accounts = [
-            BasicAccount(id=account["Id"], name=account.get("Name"))
-            for account in accounts
-            if account.get("Status") == "ACTIVE"
-        ]
-
-        active_accs = len(accounts)
-        inactive_accs = total_accounts - active_accs
-
-        details.append(f"total: {BOLD}{total_accounts}{RESET}")
-        details.append(f"active: {BOLD}{active_accs}{RESET}")
-        details.append(f"inactive: {BOLD}{inactive_accs}{RESET}")
-
-        return accounts
-
     def list_accounts_rich(self) -> list["RichAccount"]:
         details = []
 
-        listed_accounts = self.list_accounts_basic(details)
+        accounts = (
+            self.list_accounts_tree(args.parent)
+            if args.parent
+            else self.list_accounts_basic()
+        )
 
-        if args.all_accounts:
-            accounts = listed_accounts
-        else:
-            accounts = args.accounts if args.accounts else [self._current_account]
+        # Remove inactive accounts
+        if accounts:
+            total_accounts_count = len(accounts)
 
-            if listed_accounts is None:
+            accounts = [account for account in accounts if account.status == "ACTIVE"]
+
+            active_accounts_count = len(accounts)
+            inactive_accounts_count = total_accounts_count - active_accounts_count
+
+            details.append(f"total: {BOLD}{total_accounts_count}{RESET}")
+            details.append(f"active: {BOLD}{active_accounts_count}{RESET}")
+            details.append(f"inactive: {BOLD}{inactive_accounts_count}{RESET}")
+
+        if not args.all_accounts and not args.parent:
+            account_ids = args.accounts if args.accounts else [self._current_account]
+
+            if accounts is None:
                 # We couldn't list accounts, so we can neither filter out non-existing
                 # ones nor get their names. We will just use the IDs.
-                accounts = [BasicAccount(id=account, name=None) for account in accounts]
+                accounts = [BasicAccount({"Id": account}) for account in account_ids]
             else:
                 accounts = [
                     account
-                    for account_id in accounts
+                    for account_id in account_ids
                     if (
                         account := next(
-                            (acc for acc in listed_accounts if acc.id == account_id),
+                            (acc for acc in accounts if acc.id == account_id),
                             None,
                         )
                     )
                 ]
+
+        if accounts is None:
+            raise Exception(
+                "Unreachable code, accounts should be initialized at this point"
+            )
 
         if args.exclude_accounts:
             filtered_accs = [
@@ -508,18 +554,20 @@ class App:
             accounts_progress.update(1)
             return enriched
 
-        rich_accs = self._accounts_thread_pool.map(enrich_account, accounts)
-        rich_accs = [account for account in rich_accs if account]
+        rich_accs = [
+            account
+            for account in self._accounts_thread_pool.map(enrich_account, accounts)
+            if account
+        ]
 
         if len(rich_accs) < len(accounts):
             details.append(
                 f"inaccessible: {YELLOW}{BOLD}{len(accounts) - len(rich_accs)}{RESET}"
             )
 
-        details = f" ({', '.join(details)})" if details else ""
-
         logger.info(
-            f"Selected {GREEN}{BOLD}{len(accounts)}{RESET} accounts for processing{details}"
+            f"Selected {GREEN}{BOLD}{len(accounts)}{RESET} accounts for processing"
+            + (f" ({', '.join(details)})" if details else "")
         )
 
         return rich_accs
@@ -646,7 +694,7 @@ class ListAssetsInRegion:
 
     def list_ebs(self) -> list["Asset"]:
         volumes = self._ec2.get_paginator("describe_volumes")
-        volumes = volumes.paginate(
+        volumes_iter = volumes.paginate(
             Filters=[{"Name": "status", "Values": ["available", "in-use"]}]
         )
 
@@ -664,7 +712,7 @@ class ListAssetsInRegion:
                     # to count the files, so we just skip this metric.
                     files=None,
                 )
-                for page in volumes
+                for page in volumes_iter
                 for volume in page.get("Volumes", [])
             ]
         except Exception as err:
@@ -673,7 +721,7 @@ class ListAssetsInRegion:
 
     def list_ec2(self) -> list["Asset"]:
         instances = self._ec2.get_paginator("describe_instances")
-        instances = instances.paginate(
+        instances_iter = instances.paginate(
             Filters=[
                 {
                     "Name": "instance-state-name",
@@ -693,9 +741,9 @@ class ListAssetsInRegion:
                     size=None,
                     files=None,
                 )
-                for page in instances
-                for instance in page.get("Reservations", [])
-                for instance in instance.get("Instances", [])
+                for page in instances_iter
+                for instances in page.get("Reservations", [])
+                for instance in instances.get("Instances", [])
             ]
         except Exception as err:
             self._log_api_error("ec2:DescribeInstances", err)
@@ -705,6 +753,7 @@ class ListAssetsInRegion:
         if TYPE_CHECKING:
             from mypy_boto3_cloudwatch.type_defs import (
                 MetricDataResultTypeDef,
+                MetricDataQueryTypeDef,
             )
 
         if not self._region.s3_buckets:
@@ -722,10 +771,8 @@ class ListAssetsInRegion:
         end_time = datetime.now()
         start_time = end_time - timedelta(days=7)
 
-        queries = (
-            query
-            for i, bucket in enumerate(self._region.s3_buckets)
-            for query in (
+        def metric_queries(i: int, bucket: str) -> Iterable["MetricDataQueryTypeDef"]:
+            return (
                 {
                     "Id": f"bucket_size_bytes_{i}",
                     "Label": f"{bucket} bucket size",
@@ -761,9 +808,15 @@ class ListAssetsInRegion:
                     },
                 },
             )
-        )
 
-        query_chunks = chunks(queries, 500)
+        query_chunks = chunks(
+            (
+                query
+                for i, bucket in enumerate(self._region.s3_buckets)
+                for query in metric_queries(i, bucket)
+            ),
+            500,
+        )
 
         results: list[list["MetricDataResultTypeDef"]] = []
 
@@ -777,7 +830,8 @@ class ListAssetsInRegion:
                 )
             except Exception as err:
                 self._log_api_error("cloudwatch:GetMetricData", err)
-                response = {}
+
+                response = {}  # type: ignore[typeddict-item]
 
             metrics = response.get("MetricDataResults", [])
             messages = response.get("Messages", [])
@@ -893,13 +947,12 @@ class ListAssetsInRegion:
 T = TypeVar("T")
 
 
-def chunks(input: Iterable[T], chunk_size: int) -> Iterator[list[T]]:
+def chunks(input: Iterable[T], chunk_size: int):
     it = iter(input)
-    while chunk := list(itertools.islice(it, chunk_size)):
-        yield chunk
+    return iter(lambda: list(itertools.islice(it, chunk_size)), [])
 
 
-def find_name_tag(tags: Optional[list[dict]]) -> Optional[str]:
+def find_name_tag(tags: Optional[list]) -> Optional[str]:
     return next((tag["Value"] for tag in (tags or []) if tag["Key"] == "Name"), None)
 
 
@@ -962,10 +1015,15 @@ def progress_bar(unit: str, total: int, desc: str) -> tqdm:
     )
 
 
-@dataclass
 class BasicAccount:
     id: str
     name: Optional[str]
+    status: Optional["AccountStatusType"]
+
+    def __init__(self, acc: "AccountTypeDef"):
+        self.id = acc["Id"]
+        self.name = acc.get("Name")
+        self.status = acc.get("Status")
 
     def __str__(self):
         return f"{self.id} ({self.name})"

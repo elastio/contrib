@@ -2,19 +2,20 @@
 
 import argparse
 import csv
+import itertools
 import logging
 import os
 import platform
 import signal
 import sys
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Iterable, Optional
+from typing import TYPE_CHECKING, Iterable, Iterator, Optional, TypeVar
 from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
 from datetime import datetime, timedelta
 
 if TYPE_CHECKING:
-    from mypy_boto3_s3.type_defs import BucketTypeDef
+    from mypy_boto3_cloudwatch.type_defs import MetricDataQueryTypeDef
 
 __version__ = "0.33.0"
 
@@ -31,6 +32,7 @@ try:
     import botocore.session
     import botocore.config
     import botocore.credentials
+    import botocore.exceptions
     from boto3 import Session
     from tqdm import tqdm
     from tqdm.contrib.logging import logging_redirect_tqdm
@@ -38,7 +40,7 @@ except ImportError as err:
     print(
         f"{RED}Import error: {err}{RESET}\n"
         "Install the dependencies with this command:\n"
-        f"{GREEN}pip3 install --upgrade botocore boto3 tqdm{RESET}"
+        f"{GREEN}pip3 install --upgrade boto3 botocore tqdm{RESET}"
     )
     sys.exit(1)
 
@@ -111,7 +113,7 @@ regions_group.add_argument(
 arg_parser.add_argument(
     "--concurrency",
     type=int,
-    default=max(20, os.cpu_count() or 1),
+    default=max(40, os.cpu_count() or 1),
     help="Maximum number of concurrent API calls (default: %(default)s)",
 )
 arg_parser.add_argument(
@@ -182,6 +184,15 @@ logger.addHandler(handler)
 logging.getLogger("botocore.credentials").setLevel(logging.ERROR)
 
 
+def api_error_logger(prefix: str):
+    def impl(api_name: str, err: Exception):
+        logger.warning(
+            f"{prefix} {YELLOW}{BOLD}{api_name} failed{RESET}: {YELLOW}{err}{RESET}"
+        )
+
+    return impl
+
+
 ######################
 ### Business logic ###
 ######################
@@ -194,7 +205,13 @@ class App:
         )
 
         self._creds = default_session.get_credentials()
-        self._thread_pool = ThreadPoolExecutor(max_workers=args.concurrency)
+
+        self._accounts_thread_pool = ThreadPoolExecutor(
+            max_workers=int(args.concurrency * 0.3)
+        )
+        self._sub_accounts_thread_pool = ThreadPoolExecutor(
+            max_workers=int(args.concurrency * 0.7)
+        )
 
         if not self._creds:
             raise Exception(
@@ -225,18 +242,23 @@ class App:
 
         logger.info(
             f"{GREEN}Listing assets in {BOLD}{account_regions}{RESET} "
-            f"{GREEN}account-regions (concurrency: {args.concurrency})...{RESET}"
+            f"{GREEN}account-regions...{RESET}"
         )
 
         progress = InventoryProgress(account_regions)
 
-        batches = self._thread_pool.map(
-            lambda account: self.list_assets_in_account(progress, account),
+        batches = self._accounts_thread_pool.map(
+            lambda account: self.list_assets_in_regions(progress, account),
             accounts,
         )
         assets = sorted(
             (asset for assets in batches for asset in assets),
-            key=lambda asset: (asset.type, asset.account_id, asset.region, asset.name),
+            key=lambda asset: (
+                asset.type,
+                asset.account_id,
+                asset.region or "",
+                asset.name or "",
+            ),
         )
 
         logger.info(
@@ -256,14 +278,15 @@ class App:
             for asset in assets:
                 writer.writerow(
                     (
+                        asset.type,
                         asset.account_id,
                         asset.account_name,
                         asset.region,
-                        asset.type,
                         asset.name,
                         asset.id,
                         asset.state,
                         asset.size_gib,
+                        asset.files,
                     )
                 )
 
@@ -308,22 +331,18 @@ class App:
     def enrich_account(self, account: "BasicAccount") -> Optional["RichAccount"]:
         session = self.assume_role_session(account.id)
 
+        log_api_err = api_error_logger(f"{BLUE}[{account.id}]{RESET}")
+
         try:
             session.get_credentials().get_frozen_credentials()
         except Exception as err:
-            logger.warning(
-                f"[{account}] {YELLOW}{BOLD}Authentication to the account failed"
-                f"{RESET}{YELLOW}: {err}{RESET}"
-            )
+            log_api_err("Authentication to the account", err)
             return None
 
         try:
             response = session.client("ec2").describe_regions()
         except Exception as err:
-            logger.warning(
-                f"[{account}] {YELLOW}{BOLD}ec2:DescribeRegions failed"
-                f"{RESET}{YELLOW}: {err}{RESET}"
-            )
+            log_api_err("ec2:DescribeRegions", err)
             return None
 
         all_regions = [region["RegionName"] for region in response["Regions"]]
@@ -338,10 +357,56 @@ class App:
                 region for region in regions if region not in args.exclude_regions
             ]
 
+        # List S3 buckets separately. ListBuckets returns buckets from all regions,
+        # so we list them only in the default region and then distribute enrichment
+        # to regional asset listing.
+        s3 = session.client("s3")
+        try:
+            s3_buckets = [
+                bucket["Name"] for bucket in s3.list_buckets().get("Buckets", [])
+            ]
+        except Exception as err:
+            log_api_err("s3:ListBuckets", err)
+            s3_buckets = []
+
+        regions = {region: RichRegion(name=region, s3_buckets=[]) for region in regions}
+
+        def get_bucket_region(bucket: str):
+            try:
+                response = s3.head_bucket(Bucket=bucket)
+            except botocore.exceptions.ClientError as err:
+                # We can get the region from the response headers even if
+                # we don't have access to calling HeadBucket
+                response = err.response
+            except Exception as err:
+                log_api_err("s3:HeadBucket", err)
+                return
+
+            region = (
+                response.get("ResponseMetadata", {})
+                .get("HTTPHeaders", {})
+                .get("x-amz-bucket-region", "")
+            )
+
+            if region is None:
+                logger.warning(
+                    f"{self._prefix} {YELLOW}Couldn't get region "
+                    f"for bucket {bucket}. Ignoring it{RESET}"
+                )
+                return
+
+            if region := regions.get(region):
+                region.s3_buckets.append(bucket)
+
+        self._sub_accounts_thread_pool.map(
+            get_bucket_region,
+            s3_buckets,
+        )
+
         return RichAccount(
             id=account.id,
             name=account.name,
-            regions=sorted(regions),
+            regions=regions,
         )
 
     def list_accounts_basic(self, details: list[str]) -> Optional[list["BasicAccount"]]:
@@ -421,14 +486,14 @@ class App:
                 details.append(f"excluded: {BOLD}{excluded}{RESET}")
 
         logger.info(
-            f"{GREEN}Listing regions in {BOLD}{len(accounts)}{RESET} "
-            f"{GREEN}selected accounts (concurrency: {args.concurrency})...{RESET}"
+            f"{GREEN}Listing global resources in {BOLD}{len(accounts)}{RESET} "
+            f"{GREEN}selected accounts...{RESET}"
         )
 
         accounts_progress = progress_bar(
             total=len(accounts),
             unit="account",
-            desc="(listing regions)",
+            desc="(listing global resources)",
         )
 
         def enrich_account(account):
@@ -436,10 +501,8 @@ class App:
             accounts_progress.update(1)
             return enriched
 
-        rich_accs = self._thread_pool.map(enrich_account, accounts)
+        rich_accs = self._accounts_thread_pool.map(enrich_account, accounts)
         rich_accs = [account for account in rich_accs if account]
-
-        accounts_progress.clear()
 
         if len(rich_accs) < len(accounts):
             details.append(
@@ -454,7 +517,7 @@ class App:
 
         return rich_accs
 
-    def list_assets_in_account(
+    def list_assets_in_regions(
         self,
         progress: "InventoryProgress",
         account: "RichAccount",
@@ -463,12 +526,11 @@ class App:
         # would lead a memory leak in `botocore` preventing this script from being
         # able to run in Cloudshell: https://github.com/boto/botocore/issues/3366
         session = self.assume_role_session(account.id)
-
-        assets = self._thread_pool.map(
+        assets = self._sub_accounts_thread_pool.map(
             lambda region: self.list_assets_in_region(
-                progress, session, account, region
+                progress, account, session, region
             ),
-            account.regions,
+            account.regions.values(),
         )
 
         return (asset for assets in assets for asset in assets)
@@ -476,13 +538,18 @@ class App:
     def list_assets_in_region(
         self,
         progress: "InventoryProgress",
-        session: "Session",
         account: "RichAccount",
-        region: str,
+        session: "Session",
+        region: "RichRegion",
     ) -> list["Asset"]:
-        logger.debug(f"Processing {BOLD}{account}:{region}{RESET}")
-        assets = ListAssetsInRegion(progress, session, account, region).run()
+        logger.debug(f"Processing {BOLD}{account}:{region.name}{RESET}")
+
+        list_in_region = ListAssetsInRegion(progress, session, account, region)
+
+        assets = list_in_region.run()
+
         progress.regions.update(1)
+
         return assets
 
 
@@ -492,25 +559,26 @@ class ListAssetsInRegion:
         progress: "InventoryProgress",
         session: "Session",
         account: "RichAccount",
-        region: str,
+        region: "RichRegion",
     ):
         self._account = account
         self._region = region
         self._progress = progress
 
-        self._prefix = f"{YELLOW}[{account}:{region}]".ljust(29)
+        self._prefix = f"{BLUE}[{account}:{region}]{RESET}".ljust(29)
+        self._log_api_error = api_error_logger(self._prefix)
 
-        self._cloudwatch = session.client("cloudwatch", region_name=region)
-        self._ec2 = session.client("ec2", region_name=region)
-        self._efs = session.client("efs", region_name=region)
-        self._fsx = session.client("fsx", region_name=region)
-        self._s3 = session.client("s3", region_name=region)
+        self._cloudwatch = session.client("cloudwatch", region_name=region.name)
+        self._ec2 = session.client("ec2", region_name=region.name)
+        self._efs = session.client("efs", region_name=region.name)
+        self._fsx = session.client("fsx", region_name=region.name)
+        self._s3 = session.client("s3", region_name=region.name)
 
     def run(self) -> list["Asset"]:
         assets = {
             AssetType.EBS_VOLUME: self.list_ebs(),
             AssetType.EC2_INSTANCE: self.list_ec2(),
-            AssetType.S3_BUCKET: self.list_s3(),
+            AssetType.S3_BUCKET: self.enrich_s3_buckets(),
         }
 
         return [
@@ -527,7 +595,7 @@ class ListAssetsInRegion:
         return assets
 
     def log_api_error(self, api_name: str, err: Exception):
-        logger.warning(f"{self._prefix} {api_name} failed: {err}{RESET}")
+        logger.warning(f"{self._prefix} {YELLOW}{api_name} failed: {err}{RESET}")
 
     def list_ebs(self) -> list["Asset"]:
         volumes = self._ec2.get_paginator("describe_volumes")
@@ -543,7 +611,6 @@ class ListAssetsInRegion:
                     name=find_name_tag(volume.get("Tags", [])),
                     state=volume.get("State"),
                     size_gib=volume.get("Size"),
-
                     # There are no metrics about files count on an EBS volume
                     # in Cloudwatch, and we can't afford mounting the volumes
                     # to count the files, so we just skip this metric.
@@ -553,7 +620,7 @@ class ListAssetsInRegion:
                 for volume in page.get("Volumes", [])
             ]
         except Exception as err:
-            self.log_api_error("ec2:DescribeVolumes", err)
+            self._log_api_error("ec2:DescribeVolumes", err)
             return []
 
     def list_ec2(self) -> list["Asset"]:
@@ -574,7 +641,6 @@ class ListAssetsInRegion:
                     id=instance["InstanceId"],
                     name=find_name_tag(instance.get("Tags", [])),
                     state=instance.get("State", {}).get("Name"),
-
                     # We count the sizes of attached EBS volumes separately
                     size_gib=None,
                     files=None,
@@ -584,139 +650,143 @@ class ListAssetsInRegion:
                 for instance in instance.get("Instances", [])
             ]
         except Exception as err:
-            self.log_api_error("ec2:DescribeInstances", err)
+            self._log_api_error("ec2:DescribeInstances", err)
             return []
 
-    def list_s3(self) -> list["Asset"]:
-        try:
-            buckets = self._s3.list_buckets()
-        except Exception as err:
-            self.log_api_error("s3:ListBuckets", err)
-            buckets = []
+    def enrich_s3_buckets(self) -> list["Asset"]:
+        if not self._region.s3_buckets:
+            return []
 
-        return [
-            self.enrich_s3_buckets(bucket)
-            for bucket in buckets.get("Buckets", [])
-        ]
-
-    def enrich_s3_buckets(self, bucket: "BucketTypeDef") -> "Asset":
         # From the docs (https://docs.aws.amazon.com/AmazonS3/latest/userguide/cloudwatch-monitoring.html):
         # > These storage metrics for Amazon S3 are reported once per day.
         #
         # However, according to @Veetaha's experience looking at CloudWatch for these
         # metrics, there was a gap of ~1.5 day. We set the lag to 2.5 days to be safe.
-        end_time=datetime.now()
+        end_time = datetime.now()
         start_time = end_time - timedelta(days=2.5)
 
-        bucket_name = bucket["Name"]
-
-        bucket_size_bytes_id = "bucket_size_bytes"
-        number_of_objects_id = "number_of_objects"
-
-        try:
-            response = self._cloudwatch.get_metric_data(
-                StartTime=start_time,
-                EndTime=end_time,
-                ScanBy="TimestampDescending",
-                MetricDataQueries=[
-                    {
-                        "Id": bucket_size_bytes_id,
-                        "ReturnData": True,
-                        "MetricStat": {
-                            "Metric": {
-                                "Namespace": "AWS/S3",
-                                "MetricName": "BucketSizeBytes",
-                                "Dimensions": [
-                                    {"Name": "BucketName", "Value": bucket_name},
-                                    {"Name": "StorageType", "Value": "StandardStorage"},
-                                ],
-                            },
-                            "Stat": "Average",
-                            "Period": 60 * 60 * 24,
+        queries = (
+            query
+            for i, bucket in enumerate(self._region.s3_buckets)
+            for query in (
+                {
+                    "Id": f"bucket_size_bytes_{i}",
+                    "Label": f"{bucket} bucket size",
+                    "ReturnData": True,
+                    "MetricStat": {
+                        "Metric": {
+                            "Namespace": "AWS/S3",
+                            "MetricName": "BucketSizeBytes",
+                            "Dimensions": [
+                                {"Name": "BucketName", "Value": bucket},
+                                {"Name": "StorageType", "Value": "StandardStorage"},
+                            ],
                         },
+                        "Stat": "Average",
+                        "Period": 60 * 60 * 24,
                     },
-                    {
-                        "Id": number_of_objects_id,
-                        "ReturnData": True,
-                        "MetricStat": {
-                            "Metric": {
-                                "Namespace": "AWS/S3",
-                                "MetricName": "NumberOfObjects",
-                                "Dimensions": [
-                                    {"Name": "BucketName", "Value": bucket_name},
-                                    {"Name":"StorageType", "Value": "AllStorageTypes"},
-                                ],
-                            },
-                            "Stat": "Average",
-                            "Period": 60 * 60 * 24,
+                },
+                {
+                    "Id": f"number_of_objects_{i}",
+                    "Label": f"{bucket} number of objects",
+                    "ReturnData": True,
+                    "MetricStat": {
+                        "Metric": {
+                            "Namespace": "AWS/S3",
+                            "MetricName": "NumberOfObjects",
+                            "Dimensions": [
+                                {"Name": "BucketName", "Value": bucket},
+                                {"Name": "StorageType", "Value": "AllStorageTypes"},
+                            ],
                         },
-                    }
-                ]
+                        "Stat": "Average",
+                        "Period": 60 * 60 * 24,
+                    },
+                },
             )
+        )
 
-            metrics = response["MetricDataResults"]
-            messages = response["Messages"]
-        except Exception as err:
-            logger.warning(
-                f"{self._prefix} cloudwatch:GetMetricStatistics failed: {err}{RESET}"
-            )
-            metrics = []
-            messages = []
+        query_chunks = chunks(queries, 500)
 
-        for message in messages:
-            logger.warning(
-                f"{self._prefix} Got cloudwatch:GetMetricData message when getting "
-                f"metrics for the S3 bucket '{bucket_name}': {message.get('Code')}: "
-                f"{message.get('Value')}"
-            )
+        results: list[list[MetricDataQueryTypeDef]] = []
 
-        for metric in metrics:
-            if messages := metric.get("Messages"):
-                for message in messages:
-                    logger.warning(
-                        f"{self._prefix} Got cloudwatch:GetMetricData message for "
-                        f"{metric.get("Id")} S3 metric (bucket: {bucket_name}: "
-                        f"{message.get('Code')}: {message.get('Value')}"
-                    )
-
-            if (status := metric.get("StatusCode")) and status != "Complete" and status != "PartialData":
-                logger.warning(
-                    f"{self._prefix} Got cloudwatch:GetMetricData status {status} "
-                    f"for {metric.get("Id")} S3 metric (bucket: {bucket_name})"
+        for queries in query_chunks:
+            try:
+                response = self._cloudwatch.get_metric_data(
+                    StartTime=start_time,
+                    EndTime=end_time,
+                    ScanBy="TimestampDescending",
+                    MetricDataQueries=queries,
                 )
 
-        size_gib = next(
-            (
-                # Convert to GiB
-                round(value / (2 ** 30), 2)
-                for metric in metrics
-                if metric.get("Id") == bucket_size_bytes_id
-                for value in metric.get("Values", [])
-            ),
-            None,
-        )
+                metrics = response["MetricDataResults"]
+                messages = response["Messages"]
+            except Exception as err:
+                self._log_api_error(
+                    f"{self._prefix} cloudwatch:GetMetricData failed: {err}{RESET}"
+                )
+                metrics = []
+                messages = []
 
-        files = next(
-            (
-                value
-                for metric in metrics
-                if metric.get("Id") == number_of_objects_id
-                for value in metric.get("Values", [])
-            ),
-            None,
-        )
+            for message in messages:
+                logger.warning(
+                    f"{self._prefix} Got cloudwatch:GetMetricData message when getting "
+                    f"metrics for S3: {message.get('Code')}: {message.get('Value')}"
+                )
 
-        return self.asset(
-            type=AssetType.S3_BUCKET,
-            id=bucket_name,
-            name=bucket_name,
-            size_gib=size_gib,
-            files=files,
+            for metric in metrics:
+                if messages := metric.get("Messages"):
+                    for message in messages:
+                        logger.warning(
+                            f"{self._prefix} Got cloudwatch:GetMetricData message for "
+                            f"{metric.get('Id')} S3 metric: {message.get('Code')}: {message.get('Value')}"
+                        )
 
-            # Buckets don't have a state property
-            state=None,
-        )
+                if (
+                    (status := metric.get("StatusCode"))
+                    and status != "Complete"
+                    and status != "PartialData"
+                ):
+                    logger.warning(
+                        f"{self._prefix} Got cloudwatch:GetMetricData status {status} "
+                        f"for {metric.get('Id')} S3 metric"
+                    )
 
+                results.append(metrics)
+
+        assets = [
+            self.asset(
+                type=AssetType.S3_BUCKET,
+                id=bucket,
+                name=bucket,
+                size_gib=next(
+                    (
+                        # Convert to GiB
+                        round(value / (2**30), 2)
+                        for metrics in results
+                        for metric in metrics
+                        if metric.get("Id") == f"bucket_size_bytes_{i}"
+                        for value in metric.get("Values", [])
+                    ),
+                    None,
+                ),
+                files=next(
+                    (
+                        value
+                        for metrics in results
+                        for metric in metrics
+                        if metric.get("Id") == f"number_of_objects_{i}"
+                        for value in metric.get("Values", [])
+                    ),
+                    None,
+                ),
+                # Buckets don't have a state property
+                state=None,
+            )
+            for i, bucket in enumerate(self._region.s3_buckets)
+        ]
+
+        return assets
 
     def asset(
         self,
@@ -732,7 +802,7 @@ class ListAssetsInRegion:
         return Asset(
             account_id=self._account.id,
             account_name=self._account.name,
-            region=self._region,
+            region=self._region.name,
             type=type,
             id=id,
             name=name,
@@ -740,6 +810,15 @@ class ListAssetsInRegion:
             size_gib=size_gib,
             files=files,
         )
+
+
+T = TypeVar("T")
+
+
+def chunks(input: Iterable[T], chunk_size: int) -> Iterator[list[T]]:
+    it = iter(input)
+    while chunk := list(itertools.islice(it, chunk_size)):
+        yield chunk
 
 
 def find_name_tag(tags: list[dict]) -> Optional[str]:
@@ -780,7 +859,7 @@ class AssetsMetrics:
 
     def description(self):
         data_size = (
-            f" ({GREEN}{BOLD}{self._data_in_gib}{RESET} GiB)"
+            f" ({GREEN}{BOLD}{self._data_in_gib:.2f}{RESET} GiB)"
             if self._data_in_gib
             else ""
         )
@@ -789,7 +868,7 @@ class AssetsMetrics:
 
     def incr(self, size_gib: Optional[int]):
         self._count.update(1)
-        self._data_in_gib = round(self._data_in_gib + (size_gib or 0), 2)
+        self._data_in_gib += size_gib or 0
 
         self._count.set_description_str(self.description())
 
@@ -823,10 +902,16 @@ class BasicAccount:
 class RichAccount:
     id: str
     name: Optional[str]
-    regions: list[str]
+    regions: dict[str, "RichRegion"]
 
     def __str__(self):
         return f"{self.id} ({self.name})"
+
+
+@dataclass
+class RichRegion:
+    name: str
+    s3_buckets: list[str]
 
 
 @dataclass

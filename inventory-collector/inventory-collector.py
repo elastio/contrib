@@ -206,6 +206,12 @@ class App:
 
         self._creds = default_session.get_credentials()
 
+        # These two pools try to balance between the concurrency of iterating
+        # over accounts and over sub-account resources. Ideally, we should have
+        # just one thread pool for everything, but this way it's much simpler
+        # to code. It also avoids the problem of pre-constructing the list of
+        # all `Session` objects in memory (which leads to gigabytes of RAM
+        # memory usage due to https://github.com/boto/botocore/issues/3366)
         self._accounts_thread_pool = ThreadPoolExecutor(
             max_workers=int(args.concurrency * 0.3)
         )

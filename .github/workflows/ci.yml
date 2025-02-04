@@ -125,7 +125,7 @@ jobs:
         needs.changes.outputs.ci == 'true'
       )
     steps:
-      - run: pip install -r requirements.txt
+      - run: ls -la && pip install -r requirements.txt
         working-directory: ./inventory-collector
 
       # - uses: aws-actions/configure-aws-credentials@v4

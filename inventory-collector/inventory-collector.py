@@ -291,7 +291,7 @@ class App:
                         asset.name,
                         asset.id,
                         asset.state,
-                        asset.size_gib,
+                        asset.size,
                         asset.files,
                     )
                 )
@@ -439,7 +439,7 @@ class App:
         accounts = [
             BasicAccount(id=account["Id"], name=account.get("Name"))
             for account in accounts
-            if account["Status"] == "ACTIVE"
+            if account.get("Status") == "ACTIVE"
         ]
 
         active_accs = len(accounts)
@@ -559,6 +559,31 @@ class App:
         return assets
 
 
+class AssetType(str, Enum):
+    EBS_VOLUME = "ebs:volume"
+    EC2_INSTANCE = "ec2:instance"
+    S3_BUCKET = "s3:bucket"
+    EFS_FILE_SYSTEM = "efs:file-system"
+    FSX_ONTAP_VOLUME = "fsx:ontap-volume"
+
+
+@dataclass
+class Asset:
+    type: str
+    account_id: str
+    account_name: Optional[str]
+    region: str
+    name: Optional[str]
+    id: str
+    state: Optional[str]
+
+    # Size of the asset in bytes if available
+    size: Optional[int]
+
+    # Total number of files if available
+    files: Optional[int]
+
+
 class ListAssetsInRegion:
     def __init__(
         self,
@@ -579,26 +604,45 @@ class ListAssetsInRegion:
         self._efs = session.client("efs", region_name=region.name)
         self._fsx = session.client("fsx", region_name=region.name)
         self._s3 = session.client("s3", region_name=region.name)
+        self._efs = session.client("efs", region_name=region.name)
 
     def run(self) -> list["Asset"]:
-        assets = {
-            AssetType.EBS_VOLUME: self.list_ebs(),
-            AssetType.EC2_INSTANCE: self.list_ec2(),
-            AssetType.S3_BUCKET: self.enrich_s3_buckets(),
-        }
+        assets = (
+            self.list_ebs(),
+            self.list_ec2(),
+            self.enrich_s3_buckets(),
+            self.list_efs(),
+            self.list_fsx_ontap_volumes(),
+        )
 
         return [
             asset
-            for asset_type, assets in assets.items()
-            for asset in self.log_assets(assets, asset_type)
+            for assets in assets
+            for asset in assets
         ]
 
-    def log_assets(self, assets: list["Asset"], type: "AssetType") -> list["Asset"]:
-        logger.debug(
-            f"{self._prefix} Discovered {BOLD}{len(assets)}{RESET} assets"
-            f" of type {BOLD}{type}{RESET}"
+    def asset(
+        self,
+        type: "AssetType",
+        id: str,
+        name: Optional[str],
+        state: Optional[str],
+        size: Optional[int],
+        files: Optional[int],
+    ) -> "Asset":
+        self._progress.add_asset(type, size)
+
+        return Asset(
+            account_id=self._account.id,
+            account_name=self._account.name,
+            region=self._region.name,
+            type=type,
+            id=id,
+            name=name,
+            state=state,
+            size=size,
+            files=files,
         )
-        return assets
 
     def log_api_error(self, api_name: str, err: Exception):
         logger.warning(f"{self._prefix} {YELLOW}{api_name} failed: {err}{RESET}")
@@ -614,9 +658,10 @@ class ListAssetsInRegion:
                 self.asset(
                     type=AssetType.EBS_VOLUME,
                     id=volume["VolumeId"],
-                    name=find_name_tag(volume.get("Tags", [])),
+                    name=find_name_tag(volume.get("Tags")),
                     state=volume.get("State"),
-                    size_gib=volume.get("Size"),
+                    # Convert GiB to bytes
+                    size=size * (2**30) if (size := volume.get("Size")) else None,
                     # There are no metrics about files count on an EBS volume
                     # in Cloudwatch, and we can't afford mounting the volumes
                     # to count the files, so we just skip this metric.
@@ -645,10 +690,10 @@ class ListAssetsInRegion:
                 self.asset(
                     type=AssetType.EC2_INSTANCE,
                     id=instance["InstanceId"],
-                    name=find_name_tag(instance.get("Tags", [])),
+                    name=find_name_tag(instance.get("Tags")),
                     state=instance.get("State", {}).get("Name"),
                     # We count the sizes of attached EBS volumes separately
-                    size_gib=None,
+                    size=None,
                     files=None,
                 )
                 for page in instances
@@ -748,10 +793,9 @@ class ListAssetsInRegion:
                             f"{metric.get('Id')} S3 metric: {message.get('Code')}: {message.get('Value')}"
                         )
 
-                if (
-                    (status := metric.get("StatusCode"))
-                    and status != "Complete"
-                    and status != "PartialData"
+                if (status := metric.get("StatusCode")) and status not in (
+                    "Complete",
+                    "PartialData",
                 ):
                     logger.warning(
                         f"{self._prefix} Got cloudwatch:GetMetricData status {status} "
@@ -765,10 +809,9 @@ class ListAssetsInRegion:
                 type=AssetType.S3_BUCKET,
                 id=bucket,
                 name=bucket,
-                size_gib=next(
+                size=next(
                     (
-                        # Convert to GiB
-                        round(value / (2**30), 2)
+                        int(value)
                         for metrics in results
                         for metric in metrics
                         if metric.get("Id") == f"bucket_size_bytes_{i}"
@@ -778,7 +821,7 @@ class ListAssetsInRegion:
                 ),
                 files=next(
                     (
-                        value
+                        int(value)
                         for metrics in results
                         for metric in metrics
                         if metric.get("Id") == f"number_of_objects_{i}"
@@ -794,28 +837,57 @@ class ListAssetsInRegion:
 
         return assets
 
-    def asset(
-        self,
-        type: "AssetType",
-        id: str,
-        name: Optional[str],
-        state: Optional[str],
-        size_gib: Optional[int],
-        files: Optional[int],
-    ) -> "Asset":
-        self._progress.add_asset(type, size_gib)
+    def list_efs(self) -> list["Asset"]:
+        file_systems = self._efs.get_paginator("describe_file_systems")
 
-        return Asset(
-            account_id=self._account.id,
-            account_name=self._account.name,
-            region=self._region.name,
-            type=type,
-            id=id,
-            name=name,
-            state=state,
-            size_gib=size_gib,
-            files=files,
-        )
+        try:
+            return [
+                self.asset(
+                    type=AssetType.EFS_FILE_SYSTEM,
+                    id=fs["FileSystemId"],
+                    name=find_name_tag(fs.get("Tags")),
+                    state=state,
+                    size=fs.get("SizeInBytes", {}).get("Value"),
+
+                    # There are no metrics about files count on an EFS filesystem
+                    # in Cloudwatch, and we can't afford mounting the volumes
+                    # to count the files, so we just skip this metric.
+                    files=None,
+                )
+                for page in file_systems.paginate()
+                for fs in page["FileSystems"]
+                if (state := fs.get("LifeCycleState"))
+                not in ("deleted", "deleting", "error")
+            ]
+        except Exception as err:
+            self._log_api_error("efs:DescribeFileSystems", err)
+            return []
+
+    def list_fsx_ontap_volumes(self) -> list["Asset"]:
+        volumes = self._fsx.get_paginator("describe_volumes")
+
+        try:
+            return [
+                self.asset(
+                    type=AssetType.FSX_ONTAP_VOLUME,
+                    id=volume["VolumeId"],
+                    name=volume.get("Name"),
+                    state=state,
+                    size=volume.get("OntapConfiguration", {}).get("SizeInBytes"),
+
+                    # There are no metrics about files count on an FSX ONTAP volume
+                    # in Cloudwatch, and we can't afford mounting the volumes
+                    # to count the files, so we just skip this metric.
+                    files=None,
+                )
+                for page in volumes.paginate()
+                for volume in page["Volumes"]
+                if volume.get("VolumeType") == "ONTAP"
+                and (state := volume.get("Lifecycle")) not in ("DELETING", "FAILED")
+            ]
+        except Exception as err:
+            self._log_api_error("fsx:DescribeVolumes", err)
+            return []
 
 
 T = TypeVar("T")
@@ -827,8 +899,8 @@ def chunks(input: Iterable[T], chunk_size: int) -> Iterator[list[T]]:
         yield chunk
 
 
-def find_name_tag(tags: list[dict]) -> Optional[str]:
-    return next((tag["Value"] for tag in tags if tag["Key"] == "Name"), None)
+def find_name_tag(tags: Optional[list[dict]]) -> Optional[str]:
+    return next((tag["Value"] for tag in (tags or []) if tag["Key"] == "Name"), None)
 
 
 class InventoryProgress:
@@ -843,38 +915,33 @@ class InventoryProgress:
             type: AssetsMetrics(type.value) for type in AssetType
         }
 
-    def add_asset(self, type: "AssetType", size_gib: Optional[int]):
-        self._per_asset_metrics[type].incr(size_gib)
-        self._total_asset_metrics.incr(size_gib)
-
-
-class AssetType(str, Enum):
-    EBS_VOLUME = "ebs:volume"
-    EC2_INSTANCE = "ec2:instance"
-    S3_BUCKET = "s3:bucket"
+    def add_asset(self, type: "AssetType", size: Optional[int]):
+        self._per_asset_metrics[type].incr(size)
+        self._total_asset_metrics.incr(size)
 
 
 class AssetsMetrics:
     def __init__(self, label: str):
         self._label = label
-        self._data_in_gib = 0
+        self._size = 0
         self._count = tqdm(
             bar_format=f"{GREEN}{BOLD}{{n_fmt}}{RESET} {{desc}}{RESET}",
             desc=self.description(),
         )
 
     def description(self):
-        data_size = (
-            f" ({GREEN}{BOLD}{self._data_in_gib:.2f}{RESET} GiB)"
-            if self._data_in_gib
+        size = (
+            # Convert bytes to GB
+            f" ({GREEN}{BOLD}{self._size / (10**9):_.2f}{RESET} GB)"
+            if self._size
             else ""
         )
 
-        return f"{self._label}{data_size}"
+        return f"{self._label}{size}"
 
-    def incr(self, size_gib: Optional[int]):
+    def incr(self, size: Optional[int]):
         self._count.update(1)
-        self._data_in_gib += size_gib or 0
+        self._size += size or 0
 
         self._count.set_description_str(self.description())
 
@@ -918,23 +985,6 @@ class RichAccount:
 class RichRegion:
     name: str
     s3_buckets: list[str]
-
-
-@dataclass
-class Asset:
-    type: str
-    account_id: str
-    account_name: Optional[str]
-    region: str
-    name: Optional[str]
-    id: str
-    state: Optional[str]
-
-    # Size of the asset in GiB
-    size_gib: Optional[int]
-
-    # Total number of files if available
-    files: Optional[int]
 
 
 def main():

@@ -1050,7 +1050,11 @@ def main():
         with logging_redirect_tqdm([logger]):
             App().run()
     except Exception as err:
-        logger.exception(err)
+        if args.debug:
+            logger.exception(err)
+        else:
+            logger.error(err)
+
         return 1
 
     return 0

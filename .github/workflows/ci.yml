@@ -16,7 +16,6 @@ env:
   AWS_REGION: us-east-2
 jobs:
   changes:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       ci: "${{ steps.filter.outputs.ci }}"

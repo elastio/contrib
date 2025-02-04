@@ -10,9 +10,11 @@ import sys
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Iterable, Optional
 from concurrent.futures import ThreadPoolExecutor
+from enum import Enum
+from datetime import datetime, timedelta
 
 if TYPE_CHECKING:
-    from mypy_boto3_ec2.type_defs import TagTypeDef as Ec2Tag
+    from mypy_boto3_s3.type_defs import BucketTypeDef
 
 __version__ = "0.33.0"
 
@@ -29,7 +31,7 @@ try:
     import botocore.session
     import botocore.config
     import botocore.credentials
-    from botocore.session import Session
+    from boto3 import Session
     from tqdm import tqdm
     from tqdm.contrib.logging import logging_redirect_tqdm
 except ImportError as err:
@@ -39,6 +41,8 @@ except ImportError as err:
         f"{GREEN}pip3 install --upgrade botocore boto3 tqdm{RESET}"
     )
     sys.exit(1)
+
+default_session = Session()
 
 #########################
 ### Arguments parsing ###
@@ -58,9 +62,9 @@ auth_group.add_argument(
 )
 auth_group.add_argument(
     "--sts-endpoint-region",
-    help="AWS region to use for the STS endpoint (default: %(default)s). "
-    "Required for accessing opt-in regions.",
-    default=botocore.session.get_session().get_config_variable("region"),
+    help="AWS region to use for the STS endpoint. "
+    "Required for accessing opt-in regions (default: %(default)s)",
+    default=default_session.region_name,
 )
 
 accs_group = arg_parser.add_argument_group(
@@ -114,6 +118,12 @@ arg_parser.add_argument(
     "--no-progress",
     action="store_true",
     help="Disable the progress bar",
+)
+
+arg_parser.add_argument(
+    "--out-file",
+    default="inventory.csv",
+    help="Path to the file where to save the inventory data in CSV format (default: %(default)s)",
 )
 
 arg_parser.add_argument(
@@ -183,8 +193,7 @@ class App:
             f"Using botocore v{botocore.__version__}, Python v{platform.python_version()}"
         )
 
-        self._session = botocore.session.get_session()
-        self._creds = self._session.get_credentials()
+        self._creds = default_session.get_credentials()
         self._thread_pool = ThreadPoolExecutor(max_workers=args.concurrency)
 
         if not self._creds:
@@ -192,8 +201,8 @@ class App:
                 "No credentials found. Please configure your AWS credentials."
             )
 
-        self._org = self._session.create_client("organizations")
-        sts = self._session.create_client("sts")
+        self._org = default_session.client("organizations")
+        sts = default_session.client("sts")
 
         identity = sts.get_caller_identity()
 
@@ -221,12 +230,14 @@ class App:
 
         progress = InventoryProgress(account_regions)
 
-        with logging_redirect_tqdm([logger]):
-            batches = self._thread_pool.map(
-                lambda account: self.collect_inventory_in_account(progress, account),
-                accounts,
-            )
-            assets = [asset for assets in batches for asset in assets]
+        batches = self._thread_pool.map(
+            lambda account: self.list_assets_in_account(progress, account),
+            accounts,
+        )
+        assets = sorted(
+            (asset for assets in batches for asset in assets),
+            key=lambda asset: (asset.type, asset.account_id, asset.region, asset.name),
+        )
 
         logger.info(
             f"{GREEN}Inventory collection completed. "
@@ -237,7 +248,9 @@ class App:
             logger.info("No assets were collected. Exiting...")
             return
 
-        with open("inventory.csv", mode="w", newline="") as file:
+        logger.info(f"Dumping the inventory data into {BOLD}{args.out_file}{RESET}...")
+
+        with open(args.out_file, mode="w", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(field.name for field in fields(Asset))
             for asset in assets:
@@ -250,57 +263,22 @@ class App:
                         asset.name,
                         asset.id,
                         asset.state,
-                        asset.data_size_gib,
+                        asset.size_gib,
                     )
                 )
 
-    def collect_inventory_in_account(
-        self,
-        progress: "InventoryProgress",
-        account: "RichAccount",
-    ) -> Iterable["Asset"]:
-        # We could store the `session` in the `RichAccount` object, but it would
-        # would lead a memory leak in `botocore` preventing this script from being
-        # able to run in Cloudshell: https://github.com/boto/botocore/issues/3366
-        session = self.assume_role_session(account.id)
-
-        assets = self._thread_pool.map(
-            lambda region: self.collect_inventory_in_region(
-                progress, session, account, region
-            ),
-            account.regions,
-        )
-
-        return (asset for assets in assets for asset in assets)
-
-    def collect_inventory_in_region(
-        self,
-        progress: "InventoryProgress",
-        session: "Session",
-        account: "RichAccount",
-        region: str,
-    ) -> list["Asset"]:
-        logger.debug(f"Processing {BOLD}{account}:{region}{RESET}")
-        inventory = InventoryInRegion(
-            progress, session, account, region
-        ).collect_inventory()
-        progress.regions.update(1)
-        return inventory
-
     def assume_role_session(self, account: str) -> "Session":
         if account == self._current_account:
-            return self._session
+            return default_session
 
-        # Looks like there is no official way in boto to bind the assume-role
-        # credentials provider with the session other than accessing the private
-        # _credentials field directly. This is very dumb, but it works.
-        # https://stackoverflow.com/a/66346765/9259330
+        # We provide means to override the STS endpoint to usee a regional one
+        # because some newer AWS regions require using a regional endpoint,
+        # otherwise credentials returned by AssumeRole would result in an error
+        # something like "could not validate the provided access credentials".
         endpoint_url = f"https://sts.{args.sts_endpoint_region}.amazonaws.com"
 
         def client_creator(*args, **kwargs):
-            return self._session.create_client(
-                endpoint_url=endpoint_url, *args, **kwargs
-            )
+            return default_session.client(endpoint_url=endpoint_url, *args, **kwargs)
 
         fetcher = botocore.credentials.AssumeRoleCredentialFetcher(
             client_creator=client_creator,
@@ -315,14 +293,19 @@ class App:
             method="assume-role", refresh_using=fetcher.fetch_credentials
         )
 
-        assume_role_session = Session()
+        assume_role_session = botocore.session.Session()
+
+        # Looks like there is no official way in boto to bind the assume-role
+        # credentials provider with the session other than accessing the private
+        # _credentials field directly. This is very dumb, but it works.
+        # https://stackoverflow.com/a/66346765/9259330
+        # Note on a potentially related memory leak that we work around:
+        # https://github.com/boto/botocore/issues/3366
         assume_role_session._credentials = assume_role_creds
 
-        return assume_role_session
+        return Session(botocore_session=assume_role_session)
 
-    def enrich_account(
-        self, accounts_progress: tqdm, account: "BasicAccount"
-    ) -> Optional["RichAccount"]:
+    def enrich_account(self, account: "BasicAccount") -> Optional["RichAccount"]:
         session = self.assume_role_session(account.id)
 
         try:
@@ -335,7 +318,7 @@ class App:
             return None
 
         try:
-            response = session.create_client("ec2").describe_regions()
+            response = session.client("ec2").describe_regions()
         except Exception as err:
             logger.warning(
                 f"[{account}] {YELLOW}{BOLD}ec2:DescribeRegions failed"
@@ -355,13 +338,47 @@ class App:
                 region for region in regions if region not in args.exclude_regions
             ]
 
-        accounts_progress.update(1)
-
         return RichAccount(
             id=account.id,
             name=account.name,
             regions=sorted(regions),
         )
+
+    def list_accounts_basic(self, details: list[str]) -> Optional[list["BasicAccount"]]:
+        try:
+            accounts = [
+                account
+                for page in self._org.get_paginator("list_accounts").paginate()
+                for account in page["Accounts"]
+            ]
+        except Exception as err:
+            # Rethrow the error, because we must have access to ListAccounts API
+            # to be able to collect inventory data from all of them.
+            if args.all_accounts:
+                raise err
+
+            logger.warning(
+                f"{YELLOW}{BOLD}organizations:ListAccounts failed. There won't be account name "
+                f"information in the inventory{RESET}{YELLOW}: {err}{RESET}"
+            )
+            return None
+
+        total_accounts = len(accounts)
+
+        accounts = [
+            BasicAccount(id=account["Id"], name=account.get("Name"))
+            for account in accounts
+            if account["Status"] == "ACTIVE"
+        ]
+
+        active_accs = len(accounts)
+        inactive_accs = total_accounts - active_accs
+
+        details.append(f"total: {BOLD}{total_accounts}{RESET}")
+        details.append(f"active: {BOLD}{active_accs}{RESET}")
+        details.append(f"inactive: {BOLD}{inactive_accs}{RESET}")
+
+        return accounts
 
     def list_accounts_rich(self) -> list["RichAccount"]:
         details = []
@@ -414,12 +431,13 @@ class App:
             desc="(listing regions)",
         )
 
-        with logging_redirect_tqdm([logger]):
-            rich_accs = self._thread_pool.map(
-                lambda account: self.enrich_account(accounts_progress, account),
-                accounts,
-            )
-            rich_accs = [account for account in rich_accs if account]
+        def enrich_account(account):
+            enriched = self.enrich_account(account)
+            accounts_progress.update(1)
+            return enriched
+
+        rich_accs = self._thread_pool.map(enrich_account, accounts)
+        rich_accs = [account for account in rich_accs if account]
 
         accounts_progress.clear()
 
@@ -436,44 +454,39 @@ class App:
 
         return rich_accs
 
-    def list_accounts_basic(self, details: list[str]) -> Optional[list["BasicAccount"]]:
-        try:
-            accounts = [
-                account
-                for page in self._org.get_paginator("list_accounts").paginate()
-                for account in page["Accounts"]
-            ]
-        except Exception as err:
-            # Rethrow the error, because we must have access to ListAccounts API
-            # to be able to collect inventory data from all of them.
-            if args.all_accounts:
-                raise err
+    def list_assets_in_account(
+        self,
+        progress: "InventoryProgress",
+        account: "RichAccount",
+    ) -> Iterable["Asset"]:
+        # We could store the `session` in the `RichAccount` object, but it would
+        # would lead a memory leak in `botocore` preventing this script from being
+        # able to run in Cloudshell: https://github.com/boto/botocore/issues/3366
+        session = self.assume_role_session(account.id)
 
-            logger.warning(
-                f"{YELLOW}{BOLD}organizations:ListAccounts failed. There won't be account name "
-                f"information in the inventory{RESET}{YELLOW}: {err}{RESET}"
-            )
-            return None
+        assets = self._thread_pool.map(
+            lambda region: self.list_assets_in_region(
+                progress, session, account, region
+            ),
+            account.regions,
+        )
 
-        total_accounts = len(accounts)
+        return (asset for assets in assets for asset in assets)
 
-        accounts = [
-            BasicAccount(id=account["Id"], name=account.get("Name"))
-            for account in accounts
-            if account["Status"] == "ACTIVE"
-        ]
-
-        active_accs = len(accounts)
-        inactive_accs = total_accounts - active_accs
-
-        details.append(f"total: {BOLD}{total_accounts}{RESET}")
-        details.append(f"active: {BOLD}{active_accs}{RESET}")
-        details.append(f"inactive: {BOLD}{inactive_accs}{RESET}")
-
-        return accounts
+    def list_assets_in_region(
+        self,
+        progress: "InventoryProgress",
+        session: "Session",
+        account: "RichAccount",
+        region: str,
+    ) -> list["Asset"]:
+        logger.debug(f"Processing {BOLD}{account}:{region}{RESET}")
+        assets = ListAssetsInRegion(progress, session, account, region).run()
+        progress.regions.update(1)
+        return assets
 
 
-class InventoryInRegion:
+class ListAssetsInRegion:
     def __init__(
         self,
         progress: "InventoryProgress",
@@ -485,48 +498,65 @@ class InventoryInRegion:
         self._region = region
         self._progress = progress
 
-        create_client = session.create_client
-        region = self._region
+        self._prefix = f"{YELLOW}[{account}:{region}]".ljust(29)
 
-        self._ec2 = create_client("ec2", region_name=region)
-        self._efs = create_client("efs", region_name=region)
-        self._fsx = create_client("fsx", region_name=region)
-        self._s3 = create_client("s3", region_name=region)
+        self._cloudwatch = session.client("cloudwatch", region_name=region)
+        self._ec2 = session.client("ec2", region_name=region)
+        self._efs = session.client("efs", region_name=region)
+        self._fsx = session.client("fsx", region_name=region)
+        self._s3 = session.client("s3", region_name=region)
 
-    def collect_inventory(self) -> list["Asset"]:
-        return self.collect_inventory_ec2()
+    def run(self) -> list["Asset"]:
+        assets = {
+            AssetType.EBS_VOLUME: self.list_ebs(),
+            AssetType.EC2_INSTANCE: self.list_ec2(),
+            AssetType.S3_BUCKET: self.list_s3(),
+        }
 
-    def collect_inventory_ec2(self) -> list["Asset"]:
-        def find_name_tag(tags: list["Ec2Tag"]) -> Optional[str]:
-            return next((tag["Value"] for tag in tags if tag["Key"] == "Name"), None)
+        return [
+            asset
+            for asset_type, assets in assets.items()
+            for asset in self.log_assets(assets, asset_type)
+        ]
 
+    def log_assets(self, assets: list["Asset"], type: "AssetType") -> list["Asset"]:
+        logger.debug(
+            f"{self._prefix} Discovered {BOLD}{len(assets)}{RESET} assets"
+            f" of type {BOLD}{type}{RESET}"
+        )
+        return assets
+
+    def log_api_error(self, api_name: str, err: Exception):
+        logger.warning(f"{self._prefix} {api_name} failed: {err}{RESET}")
+
+    def list_ebs(self) -> list["Asset"]:
         volumes = self._ec2.get_paginator("describe_volumes")
         volumes = volumes.paginate(
             Filters=[{"Name": "status", "Values": ["available", "in-use"]}]
         )
 
-        prefix = f"{YELLOW}[{self._account}:{self._region}]".ljust(29)
-
         try:
-            volumes = [
+            return [
                 self.asset(
-                    type="ec2:volume",
+                    type=AssetType.EBS_VOLUME,
                     id=volume["VolumeId"],
                     name=find_name_tag(volume.get("Tags", [])),
                     state=volume.get("State"),
-                    data_size_gib=volume.get("Size"),
+                    size_gib=volume.get("Size"),
+
+                    # There are no metrics about files count on an EBS volume
+                    # in Cloudwatch, and we can't afford mounting the volumes
+                    # to count the files, so we just skip this metric.
+                    files=None,
                 )
                 for page in volumes
-                for volume in page["Volumes"]
+                for volume in page.get("Volumes", [])
             ]
         except Exception as err:
-            logger.warning(f"{prefix} ec2:DescribeVolumes failed: {err}{RESET}")
-            volumes = []
+            self.log_api_error("ec2:DescribeVolumes", err)
+            return []
 
-        logger.debug(
-            f"{prefix} Discovered {BOLD}{len(volumes)}{RESET} assets of type {BOLD}ec2:volume{RESET}"
-        )
-
+    def list_ec2(self) -> list["Asset"]:
         instances = self._ec2.get_paginator("describe_instances")
         instances = instances.paginate(
             Filters=[
@@ -538,50 +568,166 @@ class InventoryInRegion:
         )
 
         try:
-            instances = [
+            return [
                 self.asset(
-                    type="ec2:instance",
+                    type=AssetType.EC2_INSTANCE,
                     id=instance["InstanceId"],
                     name=find_name_tag(instance.get("Tags", [])),
                     state=instance.get("State", {}).get("Name"),
-                    data_size_gib=sum(
-                        next(
-                            (
-                                volume.data_size_gib
-                                for volume in volumes
-                                if volume.id == volume_id
-                            ),
-                            0,
-                        )
-                        for mapping in instance.get("BlockDeviceMappings", [])
-                        if (volume_id := mapping.get("Ebs", {}).get("VolumeId"))
-                    ),
+
+                    # We count the sizes of attached EBS volumes separately
+                    size_gib=None,
+                    files=None,
                 )
                 for page in instances
-                for instance in page["Reservations"]
-                for instance in instance["Instances"]
+                for instance in page.get("Reservations", [])
+                for instance in instance.get("Instances", [])
             ]
         except Exception as err:
-            logger.warning(f"{prefix} ec2:DescribeInstances failed: {err}{RESET}")
-            instances = []
+            self.log_api_error("ec2:DescribeInstances", err)
+            return []
 
-        logger.debug(
-            f"{prefix} Discovered {BOLD}{len(instances)}{RESET} assets of type {BOLD}ec2:instance{RESET}"
+    def list_s3(self) -> list["Asset"]:
+        try:
+            buckets = self._s3.list_buckets()
+        except Exception as err:
+            self.log_api_error("s3:ListBuckets", err)
+            buckets = []
+
+        return [
+            self.enrich_s3_buckets(bucket)
+            for bucket in buckets.get("Buckets", [])
+        ]
+
+    def enrich_s3_buckets(self, bucket: "BucketTypeDef") -> "Asset":
+        # From the docs (https://docs.aws.amazon.com/AmazonS3/latest/userguide/cloudwatch-monitoring.html):
+        # > These storage metrics for Amazon S3 are reported once per day.
+        #
+        # However, according to @Veetaha's experience looking at CloudWatch for these
+        # metrics, there was a gap of ~1.5 day. We set the lag to 2.5 days to be safe.
+        end_time=datetime.now()
+        start_time = end_time - timedelta(days=2.5)
+
+        bucket_name = bucket["Name"]
+
+        bucket_size_bytes_id = "bucket_size_bytes"
+        number_of_objects_id = "number_of_objects"
+
+        try:
+            response = self._cloudwatch.get_metric_data(
+                StartTime=start_time,
+                EndTime=end_time,
+                ScanBy="TimestampDescending",
+                MetricDataQueries=[
+                    {
+                        "Id": bucket_size_bytes_id,
+                        "ReturnData": True,
+                        "MetricStat": {
+                            "Metric": {
+                                "Namespace": "AWS/S3",
+                                "MetricName": "BucketSizeBytes",
+                                "Dimensions": [
+                                    {"Name": "BucketName", "Value": bucket_name},
+                                    {"Name": "StorageType", "Value": "StandardStorage"},
+                                ],
+                            },
+                            "Stat": "Average",
+                            "Period": 60 * 60 * 24,
+                        },
+                    },
+                    {
+                        "Id": number_of_objects_id,
+                        "ReturnData": True,
+                        "MetricStat": {
+                            "Metric": {
+                                "Namespace": "AWS/S3",
+                                "MetricName": "NumberOfObjects",
+                                "Dimensions": [
+                                    {"Name": "BucketName", "Value": bucket_name},
+                                    {"Name":"StorageType", "Value": "AllStorageTypes"},
+                                ],
+                            },
+                            "Stat": "Average",
+                            "Period": 60 * 60 * 24,
+                        },
+                    }
+                ]
+            )
+
+            metrics = response["MetricDataResults"]
+            messages = response["Messages"]
+        except Exception as err:
+            logger.warning(
+                f"{self._prefix} cloudwatch:GetMetricStatistics failed: {err}{RESET}"
+            )
+            metrics = []
+            messages = []
+
+        for message in messages:
+            logger.warning(
+                f"{self._prefix} Got cloudwatch:GetMetricData message when getting "
+                f"metrics for the S3 bucket '{bucket_name}': {message.get('Code')}: "
+                f"{message.get('Value')}"
+            )
+
+        for metric in metrics:
+            if messages := metric.get("Messages"):
+                for message in messages:
+                    logger.warning(
+                        f"{self._prefix} Got cloudwatch:GetMetricData message for "
+                        f"{metric.get("Id")} S3 metric (bucket: {bucket_name}: "
+                        f"{message.get('Code')}: {message.get('Value')}"
+                    )
+
+            if (status := metric.get("StatusCode")) and status != "Complete" and status != "PartialData":
+                logger.warning(
+                    f"{self._prefix} Got cloudwatch:GetMetricData status {status} "
+                    f"for {metric.get("Id")} S3 metric (bucket: {bucket_name})"
+                )
+
+        size_gib = next(
+            (
+                # Convert to GiB
+                round(value / (2 ** 30), 2)
+                for metric in metrics
+                if metric.get("Id") == bucket_size_bytes_id
+                for value in metric.get("Values", [])
+            ),
+            None,
         )
 
-        return instances + volumes
+        files = next(
+            (
+                value
+                for metric in metrics
+                if metric.get("Id") == number_of_objects_id
+                for value in metric.get("Values", [])
+            ),
+            None,
+        )
+
+        return self.asset(
+            type=AssetType.S3_BUCKET,
+            id=bucket_name,
+            name=bucket_name,
+            size_gib=size_gib,
+            files=files,
+
+            # Buckets don't have a state property
+            state=None,
+        )
+
 
     def asset(
         self,
-        type: str,
+        type: "AssetType",
         id: str,
         name: Optional[str],
         state: Optional[str],
-        data_size_gib: Optional[int],
+        size_gib: Optional[int],
+        files: Optional[int],
     ) -> "Asset":
-        self._progress.assets.update(1)
-        if data_size_gib:
-            self._progress.data.update(data_size_gib)
+        self._progress.add_asset(type, size_gib)
 
         return Asset(
             account_id=self._account.id,
@@ -591,42 +737,73 @@ class InventoryInRegion:
             id=id,
             name=name,
             state=state,
-            data_size_gib=data_size_gib,
+            size_gib=size_gib,
+            files=files,
         )
 
 
-class InventoryProgress:
-    regions: "tqdm"
-    assets: "tqdm"
-    data: "tqdm"
+def find_name_tag(tags: list[dict]) -> Optional[str]:
+    return next((tag["Value"] for tag in tags if tag["Key"] == "Name"), None)
 
+
+class InventoryProgress:
     def __init__(self, total_regions: int):
         self.regions = progress_bar(
             total=total_regions,
             desc="(listing assets)",
             unit="account-region",
-            leave=True,
         )
-        self.assets = tqdm(
-            disable=args.no_progress,
-            bar_format=f"{GREEN}{BOLD}{{n_fmt}} assets{RESET}",
-        )
-        self.data = tqdm(
-            disable=args.no_progress,
-            bar_format=f"{GREEN}{BOLD}{{n_fmt}} GiB{RESET}",
-        )
+        self._total_asset_metrics = AssetsMetrics(f"{BOLD}total assets{RESET}")
+        self._per_asset_metrics: dict["AssetType", "AssetsMetrics"] = {
+            type: AssetsMetrics(type.value) for type in AssetType
+        }
+
+    def add_asset(self, type: "AssetType", size_gib: Optional[int]):
+        self._per_asset_metrics[type].incr(size_gib)
+        self._total_asset_metrics.incr(size_gib)
 
 
-def progress_bar(unit: str, total: int, desc: str, leave=False) -> tqdm:
+class AssetType(str, Enum):
+    EBS_VOLUME = "ebs:volume"
+    EC2_INSTANCE = "ec2:instance"
+    S3_BUCKET = "s3:bucket"
+
+
+class AssetsMetrics:
+    def __init__(self, label: str):
+        self._label = label
+        self._data_in_gib = 0
+        self._count = tqdm(
+            bar_format=f"{GREEN}{BOLD}{{n_fmt}}{RESET} {{desc}}{RESET}",
+            desc=self.description(),
+        )
+
+    def description(self):
+        data_size = (
+            f" ({GREEN}{BOLD}{self._data_in_gib}{RESET} GiB)"
+            if self._data_in_gib
+            else ""
+        )
+
+        return f"{self._label}{data_size}"
+
+    def incr(self, size_gib: Optional[int]):
+        self._count.update(1)
+        self._data_in_gib = round(self._data_in_gib + (size_gib or 0), 2)
+
+        self._count.set_description_str(self.description())
+
+
+def progress_bar(unit: str, total: int, desc: str) -> tqdm:
     return tqdm(
         total=total,
         unit=unit,
         disable=args.no_progress,
-        leave=leave,
+        leave=True,
         desc=desc,
         bar_format=(
             f"{GREEN}{BOLD}{{n_fmt}} / {{total_fmt}} {{unit}}s{RESET} "
-            f"{BLUE}[Elapsed: {{elapsed}}, ETA: {{remaining}}]{RESET} "
+            f"{BLUE}[elapsed: {{elapsed}}, ETA: {{remaining}}]{RESET} "
             f"{PURPLE}[{{rate_fmt}}]{RESET} "
             f"{GREEN}{BOLD}{{desc}}: {{percentage:3.0f}}%{RESET} {{bar}}"
         ),
@@ -654,20 +831,25 @@ class RichAccount:
 
 @dataclass
 class Asset:
+    type: str
     account_id: str
     account_name: Optional[str]
     region: str
-    type: str
     name: Optional[str]
     id: str
     state: Optional[str]
+
     # Size of the asset in GiB
-    data_size_gib: Optional[int]
+    size_gib: Optional[int]
+
+    # Total number of files if available
+    files: Optional[int]
 
 
 def main():
     try:
-        App().run()
+        with logging_redirect_tqdm([logger]):
+            App().run()
     except Exception as err:
         logger.exception(err)
         return 1

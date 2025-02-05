@@ -1,4 +1,4 @@
-# Elastio Inventory collector
+# Elastio Inventory Collector
 
 Elastio Inventory Collector is a Python script, that lists resources in your AWS accounts. It can operate both within a single account and multiple accounts. You can also run it from the management AWS account and let it discover resources in the specified org unit or all accounts in your organization.
 

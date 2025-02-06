@@ -19,8 +19,8 @@ variable "elastio_cloud_connectors" {
 
   type = list(object({
     region     = string
-    vpc_id     = string
-    subnet_ids = list(string)
+    vpc_id     = optional(string)
+    subnet_ids = optional(list(string))
 
     s3_access_logging = optional(object({
       target_bucket = string
@@ -197,4 +197,20 @@ variable "support_role_expiration_date" {
 
   type    = string
   default = null
+}
+
+variable "network_configuration" {
+  description = <<DESCR
+    Allow to choose between the Elastio-managed network (`Auto`)
+    or a manually configured network (`Manual`).
+  DESCR
+
+  type     = string
+  default  = "Manual"
+  nullable = false
+
+  validation {
+    condition     = contains(["Auto", "Manual"], var.network_configuration)
+    error_message = "network_configuration must be one of 'Auto', 'Manual'"
+  }
 }

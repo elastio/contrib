@@ -93,7 +93,7 @@ accs_exclusive_group.add_argument(
 accs_exclusive_group.add_argument(
     "--parent",
     help="ID of the parent root or org unit (OU). All accounts in this subtree "
-    "and its nested will be processed",
+    "and its nested org units will be processed",
 )
 
 accs_group.add_argument(

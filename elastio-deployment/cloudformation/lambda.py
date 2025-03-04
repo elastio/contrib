@@ -49,9 +49,9 @@ def run():
         "region": os.environ["AWS_REGION"],
         "account_id": os.environ["ELASTIO_AWS_ACCOUNT_ID"],
         #
-        # None `vpc_id/subnet_ids` means we'll created a new Elastio-managed VPC
-        "vpc_id": os.environ.get("ELASTIO_VPC_ID") or "",
-        "subnet_ids": subnet_ids.split(",") if subnet_ids else [],
+        # None `vpc_id/subnet_ids` means we'll create a new Elastio-managed VPC
+        "vpc_id": os.environ.get("ELASTIO_VPC_ID") or None,
+        "subnet_ids": subnet_ids.split(",") if subnet_ids else None,
     }
 
     req = Request(

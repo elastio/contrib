@@ -41,6 +41,8 @@ jobs:
               - 'elastio-nat-provision-lambda/**'
             inventory-collector:
               - 'inventory-collector/**'
+            elastio-connector-deployer:
+              - 'elastio-deployment/cloudformation/**'
 
   typos:
     runs-on: ubuntu-latest
@@ -136,3 +138,23 @@ jobs:
 
       - run: ./run.sh
         working-directory: ./inventory-collector
+
+  elastio-connector-deployer:
+    runs-on: ubuntu-latest
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' && (
+        needs.changes.outputs.elastio-connector-deployer == 'true' ||
+        needs.changes.outputs.ci == 'true'
+      )
+    env:
+      S3_BUCKET_PREFIX: elastio-prod-artifacts
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.aws_elastio_prod_artifacts_contrib_role_arn }}
+
+      - run: cd elastio-deployment/cloudformation && ./upload.sh

@@ -21,13 +21,13 @@ First of all, you'll need a secret PAT token to authenticate your Elastio instal
 You can deploy the Elastio Connector Region stack using this Cloudformation quick-create URL. Make sure to replace the `{AWS_REGION}` with your region name:
 
 ```
-https://{AWS_REGION}.console.aws.amazon.com/cloudformation/home?region={AWS_REGION}#/stacks/create/review?templateURL=https://elastio-prod-artifacts-{AWS_REGION}.s3.{AWS_REGION}.amazonaws.com/contrib/elastio-connector-deployer/v1/cloudformation-multiple-buckets.yaml&stackName=elastio-connector-region
+https://{AWS_REGION}.console.aws.amazon.com/cloudformation/home?region={AWS_REGION}#/stacks/create/review?templateURL=https://elastio-prod-artifacts-{AWS_REGION}.s3.{AWS_REGION}.amazonaws.com/contrib/elastio-connector-deployer/v1/connector-region.yaml&stackName=elastio-connector-region
 ```
 
 Here is the bare Cloudformation template URL:
 
 ```
-https://elastio-prod-artifacts-{AWS_REGION}.s3.{AWS_REGION}.amazonaws.com/contrib/elastio-connector-deployer/v1/cloudformation-multiple-buckets.yaml&stackName=elastio-connector-region
+https://elastio-prod-artifacts-{AWS_REGION}.s3.{AWS_REGION}.amazonaws.com/contrib/elastio-connector-deployer/v1/connector-region.yaml&stackName=elastio-connector-region
 ```
 
 Specify the `ElastioTenant` and `ElastioPat` required parameters when deploying.

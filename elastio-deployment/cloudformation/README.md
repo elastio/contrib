@@ -30,4 +30,4 @@ Here is the bare Cloudformation template URL:
 https://elastio-prod-artifacts-{AWS_REGION}.s3.{AWS_REGION}.amazonaws.com/contrib/elastio-connector-deployer/v1/cloudformation-multiple-buckets.yaml&stackName=elastio-connector-region
 ```
 
-Specify the `ElastioTenant` and `ElastioPat` required parameters when deployment.
+Specify the `ElastioTenant` and `ElastioPat` required parameters when deploying.

@@ -16,6 +16,8 @@ First of all, you'll need a secret PAT token to authenticate your Elastio instal
 8. Copy the generated token.
 9. _Optional step._ Save the token in a secure place like 1Password or any other secret management system of your choice. This way you won't lose it.
 
+You'll need to specify this PAT token as an input for the Cloudformation deployment described below.
+
 ## Deploy Elastio Cloudformation Templates
 
 1. Open the [Elastio Portal](https://login.elastio.com/) in your web browser.
@@ -50,7 +52,7 @@ Here are some links to the released versions of both Cloudformation templates.
 
 > [!WARNING]
 > The single-click deployment links below are configured with the `us-east-1` region.
-> Make sure to your desired region of deployment after you follow them.
+> Make sure to switch to your desired region of deployment after you follow them.
 
 ### `connector.yaml` template
 

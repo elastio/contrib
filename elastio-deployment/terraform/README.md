@@ -1,14 +1,14 @@
-# Elastio terraform deployment
+# Elastio Terraform Deployment
 
 This is an example of how you may automate the deployment of the Elastio stack in your AWS account.
 
-## Obtain a personal access token (PAT)
+## Obtain a Personal Access Token (PAT)
 
 First of all, you'll need a secret PAT token to authenticate your Elastio installation with the Elastio Portal. You can generate one by following the steps below.
 
 1. Open the [Elastio Portal](https://login.elastio.com/) in your web browser.
-2. Click on the profile button at the top right corner of the page.
-3. Go to the `API access` tab.
+2. Go to the `Settings` page.
+3. Open the `API access` tab.
 4. Click on `Add New Access Token`.
 5. Enter the name for the token, for example `Elastio deployment`.
 6. Select the scope `Sources: Write` for the token.
@@ -16,7 +16,7 @@ First of all, you'll need a secret PAT token to authenticate your Elastio instal
 8. Copy the generated token.
 9. *Optional step.* Save the token in a secure place like 1Password or any other secret management system of your choice. This way you won't lose it.
 
-## Add Elastio to your Terraform
+## Add Elastio to Your Terraform
 
 There is a terraform module under the `module` directory. It deploys all the necessary resources for Elastio to operate. It includes the following:
 

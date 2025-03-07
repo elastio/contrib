@@ -1,0 +1,78 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/goformation/master/schema/cloudformation.schema.json
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Deploys the Elastio Connector Account and Region stacks in the current region.
+  Uses a two nested Cloudformation stacks for each of them.
+
+Parameters:
+  ElastioTenant:
+    Type: String
+    Description: The Elastio tenant name, for example 'my-tenant.app.elastio.us'
+
+  ElastioPat:
+    Type: String
+    Description: The Elastio PAT token
+
+  ElastioConnectorAccountCfnTemplateUrl:
+    Type: String
+    Description: The URL of the Elastio Connector Account Cloudformation template
+
+  ElastioVpcId:
+    Type: String
+    Default: ''
+    Description: >
+      [Optional] The VPC ID where the connector should be deployed. If not set or empty,
+      then Elastio will create an Elastio-managed VPC for the connector.
+      Make sure to enable 'Auto-Create VPC' option for the Connector Account stack.
+
+  ElastioSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >
+      [Optional] The subnet IDs where the connector should be deployed separated by commas.
+      If not set or empty,then Elastio will create an Elastio-managed VPC for the connector.
+      Make sure to enable 'Auto-Create VPC' option for the Connector Account stack.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Main Parameters }
+        Parameters:
+          - ElastioTenant
+          - ElastioPat
+          - ElastioConnectorAccountCfnTemplateUrl
+
+      - Label: { default: Network Parameters }
+        Parameters:
+          - ElastioVpcId
+          - ElastioSubnetIds
+
+Resources:
+  account:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Ref ElastioConnectorAccountCfnTemplateUrl
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+        - Key: elastio:stack:connector-account
+          Value: 'true'
+
+  region:
+    Type: AWS::CloudFormation::Stack
+
+    # It's important to deploy the Connector Region only after the Connector Account
+    # stack is deployed, because it inherently depends on the IAM roles and policies
+    # created by the Connector Account stack.
+    DependsOn: account
+
+    Properties:
+      TemplateURL: !Sub https://{{S3_BUCKET_PREFIX}}-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/{{S3_KEY_PREFIX}}/{{VERSION}}/connector-region.yaml
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+      Parameters:
+        ElastioTenant: !Ref ElastioTenant
+        ElastioPat: !Ref ElastioPat
+        ElastioVpcId: !Ref ElastioVpcId
+        ElastioSubnetIds: !Join [',', !Ref ElastioSubnetIds]

@@ -41,7 +41,7 @@ jobs:
               - 'elastio-nat-provision-lambda/**'
             inventory-collector:
               - 'inventory-collector/**'
-            elastio-connector-deployer:
+            elastio-deployment-cloudformation:
               - 'elastio-deployment/cloudformation/**'
 
   typos:
@@ -139,12 +139,12 @@ jobs:
       - run: ./run.sh
         working-directory: ./inventory-collector
 
-  elastio-connector-deployer:
+  elastio-deployment-cloudformation:
     runs-on: ubuntu-latest
     needs: changes
     if: >-
       github.event_name != 'pull_request' && (
-        needs.changes.outputs.elastio-connector-deployer == 'true' ||
+        needs.changes.outputs.elastio-deployment-cloudformation == 'true' ||
         needs.changes.outputs.ci == 'true'
       )
     env:

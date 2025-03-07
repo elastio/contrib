@@ -22,7 +22,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 export AWS_PAGER=""
 
-s3_key_prefix=contrib/elastio-connector-deployer
+s3_key_prefix=contrib/elastio-deployment/cloudformation
 
 trap cleanup SIGINT SIGTERM ERR EXIT
 
@@ -76,8 +76,8 @@ cfn_deep_link_parts=(
     "https://$AWS_REGION.console.aws.amazon.com/cloudformation/home"
     "?region=$AWS_REGION#/stacks/create/review?templateURL="
     "https://$S3_BUCKET_PREFIX-$AWS_REGION.s3.$AWS_REGION.amazonaws.com/"
-    "$s3_key_prefix/$version/connector-region.yaml"
-    "&stackName=elastio-connector-region"
+    "$s3_key_prefix/$version/connector.yaml"
+    "&stackName=elastio-connector"
     "${LINK_PARAMS:-}"
 )
 

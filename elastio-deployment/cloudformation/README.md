@@ -27,7 +27,7 @@ First of all, you'll need a secret PAT token to authenticate your Elastio instal
 7. Right-click on `Review Elastio CFN`.
 8. Click on `Copy link address`.
 
-Now you have the URL for the Elastio Connector Account cloudformation template. This cloudformation stack must be deployed only once in a single region in your AWS account. You can deploy it manually or you can combine it with additional Cloudformation templates offered in this folder that simplify the deployment of the Connector Account and other required stacks for your.
+Now you have the URL for the Elastio Connector Account Cloudformation template. This Cloudformation stack must be deployed only once in a single region in your AWS account. You can deploy it manually or you can combine it with additional Cloudformation templates offered in this folder that simplify the deployment of the Connector Account and other required stacks for your.
 
 The other stacks required for Elastio operation are called Connector Region stacks. These stacks must be installed into every region that you want to cover with Elastio scanning.
 

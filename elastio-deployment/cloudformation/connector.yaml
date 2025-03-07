@@ -7,7 +7,7 @@ Description: >
 Parameters:
   ElastioTenant:
     Type: String
-    Description: The Elastio tenant name
+    Description: The Elastio tenant name, for example 'my-tenant.app.elastio.us'
 
   ElastioPat:
     Type: String

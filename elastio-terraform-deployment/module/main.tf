@@ -38,6 +38,7 @@ locals {
     disableCustomerManagedIamPolicies = var.disable_customer_managed_iam_policies
     disableServiceLinkedRolesCreation = var.service_linked_roles == "tf"
     supportRoleExpirationDate         = var.support_role_expiration_date
+    networkConfiguration              = var.network_configuration
   }
 
   enriched_connectors = [
@@ -158,7 +159,10 @@ locals {
   elastio_cloud_connector_deploy_requests = [
     for connector in var.elastio_cloud_connectors : merge(
       connector,
-      { account_id = data.aws_caller_identity.current.account_id },
+      {
+        account_id            = data.aws_caller_identity.current.account_id,
+        network_configuration = var.network_configuration
+      }
     )
   ]
 }

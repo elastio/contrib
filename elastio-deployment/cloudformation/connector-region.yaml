@@ -1,0 +1,122 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/awslabs/goformation/master/schema/cloudformation.schema.json
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Deploys the Elastio Connector Region stack in the current region. Uses a
+  custom lambda resource that delegates the deployment to Elastio backend.
+
+Parameters:
+  ElastioTenant:
+    Type: String
+    Description: The Elastio tenant name, for example 'my-tenant.app.elastio.us'
+
+  ElastioPat:
+    Type: String
+    Description: The Elastio PAT token
+
+  ElastioVpcId:
+    Type: String
+    Default: ''
+    Description: >
+      [Optional] The VPC ID where the connector should be deployed. If not set or empty,
+      then Elastio will create an Elastio-managed VPC for the connector.
+      Make sure to enable 'Auto-Create VPC' option for the Connector Account stack.
+
+  ElastioSubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >
+      [Optional] The subnet IDs where the connector should be deployed separated by commas.
+      If not set or empty,then Elastio will create an Elastio-managed VPC for the connector.
+      Make sure to enable 'Auto-Create VPC' option for the Connector Account stack.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Main Parameters }
+        Parameters:
+          - ElastioTenant
+          - ElastioPat
+
+      - Label: { default: Network Parameters }
+        Parameters:
+          - ElastioVpcId
+          - ElastioSubnetIds
+
+Resources:
+  # The default log group that AWS Lambda creates has retention disabled.
+  # We don't want to store logs indefinitely, so we create a custom log group with
+  # retention enabled.
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/elastio-connector-deployer
+      RetentionInDays: 7
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ElastioConnectorDeployer
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+
+      Policies:
+        - PolicyName: WriteCloudWatchLogs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                # We don't give the lambda a permission to create log groups
+                # because we pre-create the log group ourselves
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Tags:
+        - Key: elastio:resource
+          Value: 'true'
+
+      FunctionName: elastio-connector-deployer
+      Handler: lambda.lambda_handler
+      Runtime: python3.13
+      MemorySize: 512
+      Timeout: 600
+      Role: !GetAtt LambdaRole.Arn
+
+      Environment:
+        Variables:
+          ELASTIO_PAT: !Ref ElastioPat
+          ELASTIO_TENANT: !Ref ElastioTenant
+          ELASTIO_AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          ELASTIO_VPC_ID: !Ref ElastioVpcId
+          ELASTIO_SUBNET_IDS: !Join [',', !Ref ElastioSubnetIds]
+      Code:
+        S3Bucket: !Sub '{{S3_BUCKET_PREFIX}}-${AWS::Region}'
+        S3Key: {{S3_KEY_PREFIX}}/{{VERSION}}/lambda.zip
+
+  ElastioConnector:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn: [LambdaLogGroup]
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      ServiceToken: !GetAtt LambdaFunction.Arn
+
+Outputs:
+  templateVersion:
+    Value: {{VERSION}}

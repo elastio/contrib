@@ -198,3 +198,18 @@ variable "support_role_expiration_date" {
   type    = string
   default = null
 }
+
+variable "ecr_public_prefix" {
+  description = <<DESCR
+    Repository prefix for the ECR Public registry. Used to configure a pull-through
+    cache for elastio images that are downloaded from ECR Public. You can configure
+    your own cache via ECR private, and then specify the repository prefix here.
+
+    This field supports 'account_id' and 'region' interpolation.
+    For example, such value can be provided:
+    '{{account_id}}.dkr.ecr.{{region}}.amazonaws.com/ecr-public'
+  DESCR
+
+  type    = string
+  default = null
+}

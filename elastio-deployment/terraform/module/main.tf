@@ -38,6 +38,7 @@ locals {
     disableCustomerManagedIamPolicies = var.disable_customer_managed_iam_policies
     disableServiceLinkedRolesCreation = var.service_linked_roles == "tf"
     supportRoleExpirationDate         = var.support_role_expiration_date
+    ecrPublicPrefix                   = var.ecr_public_prefix
   }
 
   enriched_connectors = [
@@ -91,7 +92,7 @@ locals {
 resource "terraform_data" "service_linked_roles" {
   for_each = var.service_linked_roles == "tf" ? local.service_linked_roles_services : toset([])
 
-  input = each.value
+  input            = each.value
   triggers_replace = each.value
 
   provisioner "local-exec" {
@@ -121,7 +122,7 @@ resource "aws_cloudformation_stack" "elastio_account_level_stack" {
 resource "aws_cloudformation_stack" "elastio_nat_provision_stack" {
   count = var.elastio_nat_provision_stack == null ? 0 : 1
 
-  name         = "elastio-nat-provision-lambda"
+  name = "elastio-nat-provision-lambda"
   template_url = join(
     "/",
     [

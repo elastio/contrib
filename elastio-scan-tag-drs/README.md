@@ -20,4 +20,4 @@ This script allows you to manage the `elastio:action=scan` tag on AWS DRS (Elast
 2. **Run the following command**:
 
 ```bash
-wget -O elastio-tag-drs-source-server.sh https://github.com/elastio/contrib/raw/refs/heads/drs-tag/elastio-scan-tag-drs/elastio-tag-drs-souce-server.sh && chmod +x elastio-tag-drs-source-server.sh && ./elastio-tag-drs-source-server.sh
+wget -O elastio-tag-drs-source-server.sh https://github.com/elastio/contrib/raw/refs/heads/master/elastio-scan-tag-drs/elastio-tag-drs-source-server.sh && chmod +x elastio-tag-drs-source-server.sh && ./elastio-tag-drs-source-server.sh

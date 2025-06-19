@@ -28,8 +28,10 @@ def lambda_handler(event, context):
             print(response.read().decode())
 
     try:
+        print(f"Received event: {json.dumps(event)}")
+
         if event["RequestType"] == "Create" or event["RequestType"] == "Update":
-            run()
+            run(event["ResourceProperties"])
         send_cfn_response("SUCCESS")
     except HTTPError as e:
         send_cfn_response("FAILED", f"{e}: {e.read().decode()}")
@@ -38,19 +40,19 @@ def lambda_handler(event, context):
         raise
 
 
-def run():
-    elastio_pat = os.environ["ELASTIO_PAT"]
-    elastio_tenant = os.environ["ELASTIO_TENANT"]
+def run(props):
+    elastio_pat = props["ElastioPat"]
+    elastio_tenant = props["ElastioTenant"]
     elastio_endpoint = f"https://{elastio_tenant}/public-api/v1"
 
-    subnet_ids = os.environ.get("ELASTIO_SUBNET_IDS")
+    subnet_ids = props.get("ElastioSubnetIds")
 
     request_body = {
         "region": os.environ["AWS_REGION"],
-        "account_id": os.environ["ELASTIO_AWS_ACCOUNT_ID"],
+        "account_id": props["ElastioAwsAccountId"],
         #
         # None `vpc_id/subnet_ids` means we'll create a new Elastio-managed VPC
-        "vpc_id": os.environ.get("ELASTIO_VPC_ID") or None,
+        "vpc_id": props.get("ElastioVpcId") or None,
         "subnet_ids": subnet_ids.split(",") if subnet_ids else None,
     }
 

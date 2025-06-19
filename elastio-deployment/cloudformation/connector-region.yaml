@@ -29,6 +29,14 @@ Parameters:
       If not set or empty,then Elastio will create an Elastio-managed VPC for the connector.
       Make sure to enable 'Auto-Create VPC' option for the Connector Account stack.
 
+  ElastioConnectorAccountStackVersion:
+    Type: String
+    Default: ''
+    Description: >
+      The version of the deployed Elastio Connector Account stack. This
+      parameter is used only to ensure that the connector region stack
+      deployment is re-triggred when the Connector Account stack is updated.
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -97,14 +105,6 @@ Resources:
       MemorySize: 512
       Timeout: 600
       Role: !GetAtt LambdaRole.Arn
-
-      Environment:
-        Variables:
-          ELASTIO_PAT: !Ref ElastioPat
-          ELASTIO_TENANT: !Ref ElastioTenant
-          ELASTIO_AWS_ACCOUNT_ID: !Ref AWS::AccountId
-          ELASTIO_VPC_ID: !Ref ElastioVpcId
-          ELASTIO_SUBNET_IDS: !Join [',', !Ref ElastioSubnetIds]
       Code:
         S3Bucket: !Sub '{{S3_BUCKET_PREFIX}}-${AWS::Region}'
         S3Key: {{S3_KEY_PREFIX}}/{{VERSION}}/lambda.zip
@@ -116,6 +116,16 @@ Resources:
     DeletionPolicy: Delete
     Properties:
       ServiceToken: !GetAtt LambdaFunction.Arn
+      ServiceTimeout: 60
+      ElastioPat: !Ref ElastioPat
+      ElastioTenant: !Ref ElastioTenant
+      ElastioAwsAccountId: !Ref AWS::AccountId
+      ElastioVpcId: !Ref ElastioVpcId
+      ElastioSubnetIds: !Join [',', !Ref ElastioSubnetIds]
+
+      # Make sure an update is triggered when versions change
+      ElastioConnectorAccountStackVersion: !Ref ElastioConnectorAccountStackVersion
+      ElastioConnectorRegionDelegatorStackVersion: '{{VERSION}}'
 
 Outputs:
   templateVersion:

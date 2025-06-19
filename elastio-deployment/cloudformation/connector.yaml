@@ -71,8 +71,11 @@ Resources:
       Tags:
         - Key: elastio:resource
           Value: 'true'
+        - Key: elastio:connector:account:stack-version
+          Value: !GetAtt account.Outputs.accountStackVersion
       Parameters:
         ElastioTenant: !Ref ElastioTenant
         ElastioPat: !Ref ElastioPat
         ElastioVpcId: !Ref ElastioVpcId
         ElastioSubnetIds: !Join [',', !Ref ElastioSubnetIds]
+        ElastioConnectorAccountStackVersion: !GetAtt account.Outputs.accountStackVersion

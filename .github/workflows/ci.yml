@@ -23,6 +23,7 @@ jobs:
       elastio-s3-changelog: "${{ steps.filter.outputs.elastio-s3-changelog }}"
       elastio-nat-provision-lambda: "${{ steps.filter.outputs.elastio-nat-provision-lambda }}"
       inventory-collector: "${{ steps.filter.outputs.inventory-collector }}"
+      elastio-deployment-cloudformation: "${{ steps.filter.outputs.elastio-deployment-cloudformation }}"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

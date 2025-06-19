@@ -56,10 +56,10 @@ Here are some links to the released versions of both Cloudformation templates.
 
 ### `connector.yaml` template
 
-- [Single-click deployment link](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-1.s3.us-east-1.amazonaws.com/contrib/elastio-deployment/cloudformation/v1/connector.yaml&stackName=elastio-connector)
-- [Template download link](https://elastio-prod-artifacts-us-east-1.s3.us-east-1.amazonaws.com/contrib/elastio-deployment/cloudformation/v1/connector.yaml)
+- [Single-click deployment link](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-1.s3.us-east-1.amazonaws.com/contrib/elastio-deployment/cloudformation/v2/connector.yaml&stackName=elastio-connector)
+- [Template download link](https://elastio-prod-artifacts-us-east-1.s3.us-east-1.amazonaws.com/contrib/elastio-deployment/cloudformation/v2/connector.yaml)
 
 ### `connector-region.yaml` template
 
-- [Single-click deployment link](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-1.s3.us-east-1.amazonaws.com/contrib/elastio-deployment/cloudformation/v1/connector-region.yaml&stackName=elastio-connector-region)
-- [Template download link](https://elastio-prod-artifacts-us-east-1.s3.us-east-1.amazonaws.com/contrib/elastio-deployment/cloudformation/v1/connector-region.yaml)
+- [Single-click deployment link](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-1.s3.us-east-1.amazonaws.com/contrib/elastio-deployment/cloudformation/v2/connector-region.yaml&stackName=elastio-connector-region)
+- [Template download link](https://elastio-prod-artifacts-us-east-1.s3.us-east-1.amazonaws.com/contrib/elastio-deployment/cloudformation/v2/connector-region.yaml)

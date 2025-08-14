@@ -1,9 +1,10 @@
+#!/usr/bin/env python3
 import boto3
 import json
 import os
-import re
 import argparse
 from botocore.exceptions import ClientError
+
 # -------------------------------
 # Usage:
 #
@@ -77,11 +78,23 @@ def save_policy_to_file(policy):
         json.dump(policy, f, indent=4)
     print(f"\n📁 Policy written to: {os.path.abspath(POLICY_FILENAME)}")
 
+def _merge_env_list(existing_list, to_add_dict):
+    """existing_list: [{'name':..., 'value':...}], to_add_dict: {name: value}"""
+    env_map = {e['name']: e.get('value', '') for e in (existing_list or [])}
+    changed = False
+    for k, v in to_add_dict.items():
+        if env_map.get(k) != v:
+            env_map[k] = v
+            changed = True
+    new_list = [{'name': k, 'value': v} for k, v in env_map.items()]
+    return new_list, changed
+
 def update_batch_jobs(bucket_name):
-    env_vars_to_add = [
-        {'name': 'ELASTIO_FORENSIC_ANALYSIS_ARCHIVAL_ENABLED', 'value': 'TRUE'},
-        {'name': 'ELASTIO_FORENSIC_ANALYSIS_ARCHIVAL_S3_BUCKET_NAME', 'value': bucket_name}
-    ]
+    # Correct env vars to add
+    env_vars_to_add = {
+        'ELASTIO_FORENSIC_ANALYSIS': 'TRUE',
+        'ELASTIO_FORENSIC_ANALYSIS_ARCHIVAL_S3_BUCKET_NAME': bucket_name,
+    }
 
     ec2 = boto3.client('ec2')
     regions = [r['RegionName'] for r in ec2.describe_regions()['Regions']]
@@ -92,43 +105,71 @@ def update_batch_jobs(bucket_name):
         batch = boto3.client('batch', region_name=region)
 
         try:
-            response = batch.describe_job_definitions(status='ACTIVE')
-            job_definitions = response['jobDefinitions']
+            paginator = batch.get_paginator('describe_job_definitions')
+            pages = paginator.paginate(status='ACTIVE')
         except ClientError as e:
             print(f"⚠ Skipping region {region} due to error: {e}")
             continue
 
-        if not job_definitions:
-            print("No active job definitions found.")
-            continue
+        for page in pages:
+            for job_def in page.get('jobDefinitions', []):
+                job_name = job_def.get('jobDefinitionName')
+                revision = job_def.get('revision')
+                if not job_name or not job_name.startswith("elastio"):
+                    continue
 
-        for job_def in job_definitions:
-            job_name = job_def['jobDefinitionName']
-            revision = job_def['revision']
+                print(f"🔧 Evaluating job: {job_name}:{revision}")
 
-            if job_name.startswith("elastio"):
-                print(f"🔧 Updating job: {job_name}:{revision}")
-
-                container_props = job_def['containerProperties']
-                existing_env = container_props.get('environment', [])
-
-                env_dict = {env['name']: env['value'] for env in existing_env}
-                for new_env in env_vars_to_add:
-                    env_dict[new_env['name']] = new_env['value']
-                updated_env = [{'name': k, 'value': v} for k, v in env_dict.items()]
-
-                sanitized_props = {
-                    k: v for k, v in container_props.items() if k != 'networkConfiguration'
+                # Build a new definition preserving allowed top-level fields
+                new_def = {
+                    'jobDefinitionName': job_name,
+                    'type': job_def['type'],
                 }
-                sanitized_props['environment'] = updated_env
+
+                # Preserve important top-level fields if present
+                for key in [
+                    'parameters', 'retryStrategy', 'timeout', 'tags', 'propagateTags',
+                    'schedulingPriority', 'nodeProperties', 'eksProperties',
+                    'platformCapabilities'
+                ]:
+                    if key in job_def:
+                        new_def[key] = job_def[key]
+
+                changed_any = False
+
+                # Container (EC2/Fargate) job defs
+                if 'containerProperties' in job_def:
+                    container_props = dict(job_def['containerProperties'])  # shallow copy
+                    new_env, changed = _merge_env_list(container_props.get('environment', []), env_vars_to_add)
+                    if changed:
+                        container_props['environment'] = new_env
+                        changed_any = True
+                    new_def['containerProperties'] = container_props
+
+                # EKS job defs
+                if 'eksProperties' in job_def:
+                    eks_props = dict(job_def['eksProperties'])
+                    pod_props = dict(eks_props.get('podProperties', {}))
+                    containers = [dict(c) for c in pod_props.get('containers', [])]
+                    eks_changed = False
+                    for c in containers:
+                        new_env, changed = _merge_env_list(c.get('env', []), env_vars_to_add)
+                        if changed:
+                            c['env'] = new_env
+                            eks_changed = True
+                    if eks_changed:
+                        pod_props['containers'] = containers
+                        eks_props['podProperties'] = pod_props
+                        changed_any = True
+                    new_def['eksProperties'] = eks_props
+
+                if not changed_any:
+                    print("ℹ Env already up to date; skipping re-register.")
+                    continue
 
                 try:
-                    response = batch.register_job_definition(
-                        jobDefinitionName=job_name,
-                        type=job_def['type'],
-                        containerProperties=sanitized_props
-                    )
-                    print(f"✅ Registered new revision: {response['jobDefinitionArn']}")
+                    resp = batch.register_job_definition(**new_def)
+                    print(f"✅ Registered new revision: {resp['jobDefinitionArn']}")
                 except ClientError as e:
                     print(f"❌ Failed to register {job_name} in {region}: {e}")
 

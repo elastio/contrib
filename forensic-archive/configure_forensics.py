@@ -18,7 +18,7 @@ from botocore.exceptions import ClientError
 ROLE_PREFIXES = ["elastio-account-level-stack-", "elastio-account-level-sta-"]
 ROLE_SUFFIXES = [
     "awsS3ScanBgJob", "awsFsxOntapScanBgJob", "awsEfsScanBgJob", "awsEc2ScanBgJob",
-    "awsEbsSnapshotsScanBgJob", "awsEbsScanBgJob", "awsDrsSnapshotScanBgJob",
+    "awsEbsSnapshotsScanBgJob", "awsEbsSnapshotScanBgJob", "awsEbsScanBgJob", "awsDrsSnapshotScanBgJob",
     "awsBackupRpVmScanBgJob", "awsBackupRpS3ScanBgJob", "awsBackupRpIscanBgJob",
     "awsBackupRpEfsScanBgJob", "awsBackupRpEc2ScanBgJob", "awsBackupRpEbsScanBgJob"
 ]

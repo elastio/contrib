@@ -1,0 +1,175 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for Elastio Webhook Integration with S3'
+
+Parameters:
+  AuthToken:
+    Type: String
+    NoEcho: true
+    Description: Authentication token for webhook validation
+  
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket to store webhook events
+
+Resources:
+  WebhookEventsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref S3BucketName
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  WebhookSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}-webhook-secret'
+      SecretString: !Sub '{"AUTHTOKEN":"${AuthToken}"}'
+
+  WebhookFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-webhook-handler'
+      Handler: index.lambda_handler
+      Role: !GetAtt WebhookLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import uuid
+          from datetime import datetime
+          import boto3
+          from botocore.exceptions import ClientError
+
+          def get_secret(secret_name, region_name):
+              session = boto3.session.Session()
+              client = session.client(service_name='secretsmanager', region_name=region_name)
+              try:
+                  get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+              except ClientError as e:
+                  raise e
+              return json.loads(get_secret_value_response['SecretString'])
+
+          def validate_api_key(auth_token, api_key):
+              return auth_token == api_key
+
+          def lambda_handler(event, context):
+              try:
+                  secret_name = os.environ["SECRETNAME"]
+                  region_name = os.environ["AWSREGION"]
+                  s3_bucket = os.environ["S3BUCKET"]
+              except KeyError as exc:
+                  print(f"Required environment variable {exc} missing")
+                  return {
+                      "statusCode": 400,
+                      "body": json.dumps(f"Required environment variable {exc} missing")
+                  }
+
+              try:
+                  secret = get_secret(secret_name, region_name)
+                  auth_token = secret["AUTHTOKEN"]
+                  api_key = event.get("headers", {}).get("x-api-key")
+                  if not validate_api_key(auth_token, api_key):
+                      print("Unauthorized: Invalid API key")
+                      return {
+                          "statusCode": 401,
+                          "body": json.dumps("Unauthorized")
+                      }
+              except Exception as e:
+                  print(f"Error in API key validation: {str(e)}")
+                  return {
+                      "statusCode": 500,
+                      "body": json.dumps("Internal server error during authentication")
+                  }
+
+              try:
+                  if event.get("isBase64Encoded", False):
+                      import base64
+                      body = json.loads(base64.b64decode(event["body"]))
+                  else:
+                      body = json.loads(event["body"])
+
+                  timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+                  unique_id = str(uuid.uuid4())
+                  filename = f"{timestamp}-{unique_id}.json"
+
+                  s3 = boto3.client('s3')
+                  s3.put_object(
+                      Bucket=s3_bucket,
+                      Key=filename,
+                      Body=json.dumps(body, ensure_ascii=False).encode('utf8'),
+                      ContentType='application/json'
+                  )
+
+                  print(f"Successfully stored event in S3: s3://{s3_bucket}/{filename}")
+                  return {
+                      "statusCode": 200,
+                      "body": json.dumps("Event successfully processed and stored")
+                  }
+              except Exception as e:
+                  print(f"Error processing event: {str(e)}")
+                  return {
+                      "statusCode": 500,
+                      "body": json.dumps(f"Error processing event: {str(e)}")
+                  }
+      Runtime: python3.13
+      Timeout: 10
+      Environment:
+        Variables:
+          AWSREGION: !Ref AWS::Region
+          S3BUCKET: !Ref S3BucketName
+          SECRETNAME: !Ref WebhookSecret
+
+  WebhookFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      TargetFunctionArn: !GetAtt WebhookFunction.Arn
+
+  WebhookFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebhookFunction
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+
+  WebhookLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: WebhookLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub '${WebhookEventsBucket.Arn}/*'
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref WebhookSecret
+
+Outputs:
+  FunctionUrl:
+    Description: URL endpoint for webhook
+    Value: !GetAtt WebhookFunctionUrl.FunctionUrl
+  
+  SecretName:
+    Description: Name of the secret containing the auth token
+    Value: !Ref WebhookSecret
+  
+  S3BucketName:
+    Description: Name of the S3 bucket for webhook events
+    Value: !Ref S3BucketName

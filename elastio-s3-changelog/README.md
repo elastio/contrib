@@ -1,7 +1,7 @@
 # S3 Changelog
 
 For large buckets, scanning all objects might take a lot of time. This CloudFormation template enables
-the Changelog feature for S3 buckets, which significantly improves the scan performance after the initial
+the Changelog feature for S3 buckets, which improves the scan performance after the initial
 scan of the entire bucket is done.
 
 This template deploys an SQS queue and an EventBridge rule which sends S3 update events to the queue.
@@ -32,7 +32,10 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 3. Fill in the main parameters:
     * *BucketNames* - comma-separated list of S3 bucket names;
 
-    * *ScanExistingObjects* - set to `true` if you want to perform the initial scan of all objects in the bucket(s);
+    * *CrossAccount* - set this to `true` if you are using a centralized Elastio Cloud Connector
+      that lives in a different AWS account than your S3 buckets.
+
+    * *ScanExistingObjects* - set to `true` if you want to perform the initial scan of all objects in the bucket(s). This option must be set to `false` if `CrossAccount` is enabled!
 
     * *KeyPrefixes* - (optional) comma-separated list of prefixes of objects to scan. This will be applied to all buckets.
         If you want to use different prefixes for different buckets, you need to deploy multiple S3 Changelog stacks.

@@ -33,7 +33,7 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
     * *BucketNames* - comma-separated list of S3 bucket names;
 
     * *CrossAccount* - set this to true if the scan happens in a different AWS account than the
-      S3 bucket (i.e., you are using a centralized scanning account). If it is not set
+      S3 bucket (i.e. you are using a centralized scanning account). If it is not set
       to true in the cross-account case, an error about missing AWS Lambda functions
       will occur during stack creation.
 

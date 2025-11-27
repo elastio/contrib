@@ -15,7 +15,7 @@ Parameters:
     Default: 'false'
     Description: >
       Set this to true if the scan happens in a different AWS account than the
-      S3 bucket (i.e., you are using a centralized scanning account). If it is not set
+      S3 bucket (i.e. you are using a centralized scanning account). If it is not set
       to true in the cross-account case, an error about missing AWS Lambda functions
       will occur during stack creation.
 

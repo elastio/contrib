@@ -9,6 +9,16 @@ Parameters:
     ConstraintDescription: Bucket name must be at least 3 characters long.
     Description: S3 bucket name.
 
+  CrossAccount:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      Set this to true if the scan happens in a different AWS account than the
+      S3 bucket (i.e. you are using a centralized scanning account). If it is not set
+      to true in the cross-account case, an error about missing AWS Lambda functions
+      will occur during stack creation.
+
   ScanExistingObjects:
     Type: String
     AllowedValues: ['true', 'false']
@@ -16,6 +26,9 @@ Parameters:
     Description: >
       If set to true, the full initial scan of the bucket will be performed.
       If set to false, only new objects in the bucket will be scanned.
+      This option can only be enabled when CrossAccount is false. If it is not set
+      to false in the cross-account case, an error about missing AWS Lambda functions
+      will occur during stack creation.
 
   KeyPrefixes:
     # Unfortunately, it's impossible to pass CommaDelimitedList to a nested stack,
@@ -74,6 +87,7 @@ Metadata:
       - Label: { default: Main Parameters }
         Parameters:
           - BucketName
+          - CrossAccount
           - ScanExistingObjects
           - KeyPrefixes
 
@@ -89,6 +103,7 @@ Metadata:
           - QrtsMaxDelay
 
 Conditions:
+  NotCrossAccount: !Equals [!Ref CrossAccount, 'false']
   ScanExistingObjects: !Equals [!Ref ScanExistingObjects, 'true']
   DisableEventCollection: !Equals [!Ref DisableEventCollection, 'true']
   EnableDlq: !Equals [!Ref EnableDlq, 'true']
@@ -216,6 +231,7 @@ Resources:
 
   queueRefreshSchedule:
     Type: AWS::Scheduler::Schedule
+    Condition: NotCrossAccount
     Properties:
       Description: A schedule to invoke the periodic changelog queue refresh lambda
       ScheduleExpression: cron(0/15 * * * ? *)

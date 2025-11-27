@@ -12,6 +12,16 @@ Parameters:
       Comma-delimited list of S3 bucket names.
       Example: examplebucket1, examplebucket2
 
+  CrossAccount:
+    Type: String
+    AllowedValues: ['true', 'false']
+    Default: 'false'
+    Description: >
+      Set this to true if the scan happens in a different AWS account than the
+      S3 bucket (i.e. you are using a centralized scanning account). If it is not set
+      to true in the cross-account case, an error about missing AWS Lambda functions
+      will occur during stack creation.
+
   ScanExistingObjects:
     Type: String
     AllowedValues: ['true', 'false']
@@ -19,6 +29,9 @@ Parameters:
     Description: >
       If set to true, the full initial scan of the bucket will be performed.
       If set to false, only new objects in the bucket will be scanned.
+      This option can only be enabled when CrossAccount is false. If it is not set
+      to false in the cross-account case, an error about missing AWS Lambda functions
+      will occur during stack creation.
 
   KeyPrefixes:
     Type: CommaDelimitedList
@@ -75,6 +88,7 @@ Metadata:
       - Label: { default: Main Parameters }
         Parameters:
           - BucketNames
+          - CrossAccount
           - ScanExistingObjects
           - KeyPrefixes
 
@@ -95,6 +109,7 @@ Resources:
     Properties:
       Parameters:
         BucketNames: !Join [',', !Ref BucketNames]
+        CrossAccount: !Ref CrossAccount
         ScanExistingObjects: !Ref ScanExistingObjects
         KeyPrefixes: !Join [',', !Ref KeyPrefixes]
         DisableEventCollection: !Ref DisableEventCollection

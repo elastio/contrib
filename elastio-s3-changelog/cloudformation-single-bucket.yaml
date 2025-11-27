@@ -9,7 +9,6 @@ Parameters:
     ConstraintDescription: Bucket name must be at least 3 characters long.
     Description: S3 bucket name.
 
-
   CrossAccount:
     Type: String
     AllowedValues: ['true', 'false']

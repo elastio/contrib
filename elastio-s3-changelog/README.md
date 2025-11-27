@@ -32,10 +32,16 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
 3. Fill in the main parameters:
     * *BucketNames* - comma-separated list of S3 bucket names;
 
-    * *CrossAccount* - set this to `true` if you are using a centralized Elastio Cloud Connector
-      that lives in a different AWS account than your S3 buckets.
+    * *CrossAccount* - set this to true if the scan happens in a different AWS account than the
+      S3 bucket (i.e., you are using a centralized scanning account). If it is not set
+      to true in the cross-account case, an error about missing AWS Lambda functions
+      will occur during stack creation.
 
-    * *ScanExistingObjects* - set to `true` if you want to perform the initial scan of all objects in the bucket(s). This option must be set to `false` if `CrossAccount` is enabled!
+    * *ScanExistingObjects* - if set to true, the full initial scan of the bucket will be performed.
+      If set to false, only new objects in the bucket will be scanned.
+      This option can only be enabled when CrossAccount is false. If it is not set
+      to false in the cross-account case, an error about missing AWS Lambda functions
+      will occur during stack creation.
 
     * *KeyPrefixes* - (optional) comma-separated list of prefixes of objects to scan. This will be applied to all buckets.
         If you want to use different prefixes for different buckets, you need to deploy multiple S3 Changelog stacks.

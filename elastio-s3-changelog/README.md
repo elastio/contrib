@@ -28,6 +28,7 @@ Then, the Elastio `iscan` job reads those events to perform the scanning of new 
     * [ap-south-1](https://ap-south-1.console.aws.amazon.com/cloudformation/home?region=ap-south-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
     * [ap-southeast-1](https://ap-southeast-1.console.aws.amazon.com/cloudformation/home?region=ap-southeast-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
     * [ap-southeast-2](https://ap-southeast-2.console.aws.amazon.com/cloudformation/home?region=ap-southeast-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
+    * [me-central-1](https://me-central-1.console.aws.amazon.com/cloudformation/home?region=me-central-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v2/cloudformation-multiple-buckets.yaml&stackName=elastio-s3-changelog)
 
 3. Fill in the main parameters:
     * *BucketNames* - comma-separated list of S3 bucket names;

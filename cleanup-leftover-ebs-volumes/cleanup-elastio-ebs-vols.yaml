@@ -1,12 +1,12 @@
-AWSTemplateFormatVersion: '2010-09-09'
-Transform: 'AWS::Serverless-2016-10-31'
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
 Resources:
   EBSVolumeCleanupFunction:
-    Type: 'AWS::Serverless::Function'
+    Type: "AWS::Serverless::Function"
     Properties:
       FunctionName: EBSVolumeCleanupFunction
-      Description: 'A Lambda function to delete un-attached EBS volumes older than 24 hours with the elastio:resource tag'
-      Runtime: nodejs20.x
+      Description: "A Lambda function to delete un-attached EBS volumes older than 24 hours with the elastio:resource tag"
+      Runtime: nodejs24.x
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       InlineCode: |-
@@ -68,44 +68,44 @@ Resources:
         Schedule1:
           Type: Schedule
           Properties:
-            Schedule: 'rate(1 hour)'
+            Schedule: "rate(1 hour)"
   LambdaExecutionRole:
-    Type: 'AWS::IAM::Role'
+    Type: "AWS::IAM::Role"
     Properties:
       RoleName: LambdaExecutionRole
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
               Service:
                 - lambda.amazonaws.com
             Action:
-              - 'sts:AssumeRole'
+              - "sts:AssumeRole"
       Policies:
         - PolicyName: EC2EBSVolumePolicy
           PolicyDocument:
-            Version: '2012-10-17'
+            Version: "2012-10-17"
             Statement:
               - Effect: Allow
                 Action:
-                  - 'ec2:DescribeVolumes'
-                Resource: '*'
+                  - "ec2:DescribeVolumes"
+                Resource: "*"
               - Effect: Allow
                 Action:
-                  - 'ec2:DeleteVolume'
-                Resource: '*'
+                  - "ec2:DeleteVolume"
+                Resource: "*"
                 Condition:
                   StringLike:
-                    'aws:ResourceTag/elastio:resource': '*'
+                    "aws:ResourceTag/elastio:resource": "*"
               - Effect: Allow
                 Action:
-                  - 'logs:CreateLogGroup'
-                  - 'logs:CreateLogStream'
-                  - 'logs:PutLogEvents'
-                Resource: 'arn:aws:logs:*:*:*'
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "arn:aws:logs:*:*:*"
   EBSVolumeCleanupLogGroup:
-    Type: 'AWS::Logs::LogGroup'
+    Type: "AWS::Logs::LogGroup"
     Properties:
-      LogGroupName: '/aws/lambda/EBSVolumeCleanupFunction'
+      LogGroupName: "/aws/lambda/EBSVolumeCleanupFunction"
       RetentionInDays: 7

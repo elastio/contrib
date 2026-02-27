@@ -62,7 +62,7 @@ Resources:
     Properties:
       FunctionName: elastio-cleanup-imported-ebs-snapshots
       Description: "A Lambda function to delete EBS snapshots tagged with elastio:imported-to-rp"
-      Runtime: nodejs20.x
+      Runtime: nodejs24.x
       Handler: index.handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Events:

@@ -29,6 +29,7 @@ be no route `0.0.0.0/0` configured in the route table of the private subnet.
     * [ap-south-1](https://ap-south-1.console.aws.amazon.com/cloudformation/home?region=ap-south-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-nat-provision-lambda/v5/cloudformation-lambda.yaml&stackName=elastio-nat-provision-lambda)
     * [ap-southeast-1](https://ap-southeast-1.console.aws.amazon.com/cloudformation/home?region=ap-southeast-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-nat-provision-lambda/v5/cloudformation-lambda.yaml&stackName=elastio-nat-provision-lambda)
     * [ap-southeast-2](https://ap-southeast-2.console.aws.amazon.com/cloudformation/home?region=ap-southeast-2#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-nat-provision-lambda/v5/cloudformation-lambda.yaml&stackName=elastio-nat-provision-lambda)
+    * [me-central-1](https://me-central-1.console.aws.amazon.com/cloudformation/home?region=me-central-1#/stacks/create/review?templateURL=https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-nat-provision-lambda/v5/cloudformation-lambda.yaml&stackName=elastio-nat-provision-lambda)
 
 2. Check the box in front of `I acknowledge that AWS CloudFormation might create IAM resources`
     and click `Create stack`.

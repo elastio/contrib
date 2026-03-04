@@ -12,32 +12,23 @@ Parameters:
     Type: String
   CrossAccount:
     Type: String
-    Default: 'false'
+    Default: "false"
   ScanExistingObjects:
     Type: String
-    Default: 'false'
+    Default: "false"
   KeyPrefixes:
     Type: String
   DisableEventCollection:
     Type: String
-    Default: 'false'
+    Default: "false"
   EnableDlq:
     Type: String
-    Default: 'true'
-  EnableQrts:
-    Type: String
-    Default: 'false'
-  QrtsBatchSize:
-    Type: Number
-    MinValue: 0
-  QrtsMaxDelay:
-    Type: Number
-    MinValue: 60
+    Default: "true"
 Resources:
-  'Fn::ForEach::Stacks':
+  "Fn::ForEach::Stacks":
     - BucketName
-    - !Split [',', !Ref BucketNames]
-    - 'stack&{BucketName}':
+    - !Split [",", !Ref BucketNames]
+    - "stack&{BucketName}":
         Type: AWS::CloudFormation::Stack
         Properties:
           Parameters:
@@ -47,9 +38,6 @@ Resources:
             KeyPrefixes: !Ref KeyPrefixes
             DisableEventCollection: !Ref DisableEventCollection
             EnableDlq: !Ref EnableDlq
-            EnableQrts: !Ref EnableQrts
-            QrtsBatchSize: !Ref QrtsBatchSize
-            QrtsMaxDelay: !Ref QrtsMaxDelay
           TemplateURL: !Sub https://{{S3_BUCKET_PREFIX}}-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/{{S3_KEY_PREFIX}}/{{VERSION}}/cloudformation-single-bucket.yaml
 Outputs:
   templateVersion:

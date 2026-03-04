@@ -150,10 +150,7 @@ Resources:
           InputTransformer:
             InputPathsMap:
               data: "$"
-            InputTemplate: '{
-              "kind": "S3Update",
-              "data": <data>
-              }'
+            InputTemplate: '{ "kind": "S3Update", "data": <data> }'
 
   queueInlinePolicy:
     Type: AWS::SQS::QueueInlinePolicy

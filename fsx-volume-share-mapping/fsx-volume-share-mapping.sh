@@ -34,7 +34,7 @@ if [ -z "${API_USER:-}" ] || [ -z "${API_PASS:-}" ]; then
 fi
 
 # -------------------------------
-# Install dependencies (if missing)
+# Install dependencies
 # -------------------------------
 echo "Checking and installing dependencies..."
 
@@ -186,9 +186,6 @@ for FSID in $FS_IDS; do
     continue
   fi
 
-  # -------------------------------
-  # Append matched entries to final result
-  # -------------------------------
   RESULT=$(echo "$RESULT $MATCHED" | jq -s 'add')
 done
 

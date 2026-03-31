@@ -37,11 +37,11 @@ fi
 # Install dependencies
 # -------------------------------
 echo "Installing dependencies (jq, curl, unzip, AWS CLI)..."
-sudo apt update  >/dev/null 2>&1
-sudo apt install -y jq curl unzip  >/dev/null 2>&1
-curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"  >/dev/null 2>&1
-unzip -o awscliv2.zip >/dev/null 2>&1
-sudo ./aws/install  >/dev/null 2>&1
+sudo apt update -qq
+sudo apt install -y -qq jq curl unzip
+curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip -o awscliv2.zip >/dev/null
+sudo ./aws/install >/dev/null
 
 # -------------------------------
 # Check AWS CLI access

@@ -40,28 +40,28 @@ echo "Checking and installing dependencies..."
 
 # jq
 if ! command -v jq >/dev/null 2>&1; then
-  echo "[INFO] Installing jq..."
+  echo "Installing jq..."
   sudo apt update -qq
   sudo apt install -y -qq jq
 fi
 
 # curl
 if ! command -v curl >/dev/null 2>&1; then
-  echo "[INFO] Installing curl..."
+  echo "Installing curl..."
   sudo apt update -qq
   sudo apt install -y -qq curl
 fi
 
 # unzip
 if ! command -v unzip >/dev/null 2>&1; then
-  echo "[INFO] Installing unzip..."
+  echo "Installing unzip..."
   sudo apt update -qq
   sudo apt install -y -qq unzip
 fi
 
 # aws
 if ! command -v aws >/dev/null 2>&1; then
-  echo "[INFO] Installing AWS CLI..."
+  echo "Installing AWS CLI..."
   curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
   unzip -o awscliv2.zip >/dev/null
   sudo ./aws/install >/dev/null

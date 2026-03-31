@@ -36,7 +36,7 @@ fi
 # -------------------------------
 # Install dependencies (if missing)
 # -------------------------------
-echo "[STEP] Checking and installing dependencies..."
+echo "Checking and installing dependencies..."
 
 # jq
 if ! command -v jq >/dev/null 2>&1; then

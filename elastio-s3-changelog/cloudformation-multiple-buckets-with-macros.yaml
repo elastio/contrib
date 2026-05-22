@@ -10,9 +10,6 @@ Transform:
 Parameters:
   BucketNames:
     Type: String
-  CrossAccount:
-    Type: String
-    Default: "false"
   ScanExistingObjects:
     Type: String
     Default: "false"
@@ -33,7 +30,6 @@ Resources:
         Properties:
           Parameters:
             BucketName: !Ref BucketName
-            CrossAccount: !Ref CrossAccount
             ScanExistingObjects: !Ref ScanExistingObjects
             KeyPrefixes: !Ref KeyPrefixes
             DisableEventCollection: !Ref DisableEventCollection

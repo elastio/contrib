@@ -75,7 +75,7 @@ Parameters:
   ElastioChangelogStackURL:
     Type: String
     Description: 'The URL for the S3 scan changelog stack.[DO NOT MODIFY Unless Advised]'
-    Default: 'https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-single-bucket.yaml'
+    Default: 'https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v4/cloudformation-single-bucket.yaml'
   RestoreSimulationInstanceType:
     Type: String
     Description: 'The instance type for the Restore Simulated Virtual Machine.[DO NOT MODIFY Unless Advised]'
@@ -763,7 +763,7 @@ Resources:
                                 elastio_s3_changelog_stack_url = os.environ.get('ElastioChangelogStackURL')
                                 if not elastio_s3_changelog_stack_url:
                                     logger.info('ElastioChangelogStackURL env variable NOT defined. Defaulting value.')
-                                    elastio_s3_changelog_stack_url = 'https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v1/cloudformation-single-bucket.yaml'
+                                    elastio_s3_changelog_stack_url = 'https://elastio-prod-artifacts-us-east-2.s3.us-east-2.amazonaws.com/contrib/elastio-s3-changelog/v4/cloudformation-single-bucket.yaml'
 
                                 cfn_client = boto3.client('cloudformation')
                                 try:

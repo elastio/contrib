@@ -166,6 +166,8 @@ Resources:
             # Define constants
             ALLOWED_RESOURCE_TYPES = {"ec2"}    
             RT_STATUS_MESSAGE_MAX_LENGTH=1000
+            EFS_POLL_SECONDS = 5
+            EFS_DISPATCH_RESERVE_SECONDS = 15
             INTEGRATION_DEFAULT_SG_NAME = 'ElastioSGForDefaultVPCAccess'
             INTEGRATION_DEFAULT_SG_DESCRIPTION = 'Allow all traffic to / from ElastioSG for default vault'
 
@@ -445,28 +447,32 @@ Resources:
                 try:
                     ec2_client = boto3.client('ec2')
                     default_vpc_id = get_default_vpc_id()
-                    subnets = ec2_client.describe_subnets(Filters=[{'Name': 'vpc-id', 'Values': [default_vpc_id]}])['Subnets']
+                    pages = ec2_client.get_paginator('describe_subnets').paginate(
+                        Filters=[{'Name': 'vpc-id', 'Values': [default_vpc_id]}])
+                    subnets = [subnet for page in pages for subnet in page['Subnets']]
                 except (ClientError, Exception):
                     var = traceback.format_exc()
                     logger.error(f"Error {var} finding default subnets in get_default_vpc_subnets")
                 return subnets
 
-            def create_efs_mount_targets(efs_file_system_id, subnets, security_group_id):
-                try:
-                    if subnets:                        
-                        for subnet in subnets:
-                            subnet_id = subnet['SubnetId']
-                            logger.info(f"create_efs_mount_targets for subnet : {subnet_id} with SG : {security_group_id} for FS : {efs_file_system_id}")
-                            response = efs_client.create_mount_target(
-                                FileSystemId=efs_file_system_id,
-                                SubnetId=subnet_id,
-                                SecurityGroups=[security_group_id]
-                            )
-
-                            logger.info(f"Mount target created for subnet {subnet_id}: {response['MountTargetId']}")
-                except (ClientError, Exception):
-                    var = traceback.format_exc()
-                    logger.error(f"Error {var} in create_efs_mount_targets")   
+            def efs_mount_target_states(file_system_id, vpc_id, zone_by_subnet):
+                pages = efs_client.get_paginator('describe_mount_targets').paginate(FileSystemId=file_system_id)
+                states = {}
+                for page in pages:
+                    for target in page['MountTargets']:
+                        state = target['LifeCycleState']
+                        if state == 'deleted':
+                            continue
+                        target_vpc = target.get('VpcId')
+                        if target_vpc and target_vpc != vpc_id:
+                            raise RuntimeError(
+                                f"EFS {file_system_id} already has mount target in VPC {target_vpc}, expected {vpc_id}")
+                        subnet_id = target['SubnetId']
+                        zone = zone_by_subnet.get(subnet_id)
+                        if not zone or (target.get('AvailabilityZoneId') and target['AvailabilityZoneId'] != zone):
+                            raise ValueError(f"Cannot match EFS mount target subnet {subnet_id} to an AZ in {vpc_id}")
+                        states[zone] = state
+                return states
 
             def get_efs_resource_id(efs_arn):
                 # Split the ARN by colon (':') and get the last part
@@ -534,22 +540,79 @@ Resources:
                 
                 return rp_backup_vault_name
 
-            def prep_for_efs_restore_test(restored_resource_id):
-                logger.info(f'Processing prep_for_efs_restore_test for :{restored_resource_id}')
-                #Create and Attach the SGs as required
-                security_group_id = attach_elastio_sg_to_default_sg()
+            def prep_for_efs_restore_test(file_system_id, context):
+                def time_left():
+                    seconds = context.get_remaining_time_in_millis() / 1000 - EFS_DISPATCH_RESERVE_SECONDS
+                    if seconds <= 0:
+                        raise TimeoutError("Insufficient Lambda time remaining for EFS preparation")
+                    return seconds
 
-                # Get subnets in the default VPC to prepare mount targets
-                default_vpc_subnets = get_default_vpc_subnets()
+                time_left()
+                subnets = get_default_vpc_subnets()
+                if not subnets:
+                    raise ValueError("No subnets found in the default VPC")
+                vpc_id = subnets[0]['VpcId']
+                file_system = efs_client.describe_file_systems(FileSystemId=file_system_id)['FileSystems'][0]
+                single_zone = file_system.get('AvailabilityZoneId')
+                zone_by_subnet = {s['SubnetId']: s['AvailabilityZoneId'] for s in subnets}
+                required_zones = set(zone_by_subnet.values())
+                if single_zone:
+                    if single_zone not in required_zones:
+                        raise ValueError(f"No default VPC subnet in EFS zone {single_zone}")
+                    required_zones = {single_zone}
 
-                if default_vpc_subnets:
-                    # Create EFS mount targets in the default VPC subnets
-                    create_efs_mount_targets(restored_resource_id, default_vpc_subnets, security_group_id) 
-                else:
-                    logger.error("Error getting default_vpc_subnets. Elastio test will fail")
+                states = efs_mount_target_states(file_system_id, vpc_id, zone_by_subnet)
+                missing = required_zones.difference(states)
+                # Free addresses matter only when creating a target. An existing target already has an address.
+                candidates = {zone: [] for zone in missing}
+                for subnet in subnets:
+                    zone = subnet['AvailabilityZoneId']
+                    if (zone in missing and subnet.get('State', 'available') == 'available'
+                            and subnet.get('AvailableIpAddressCount') != 0):
+                        candidates[zone].append(subnet['SubnetId'])
+
+                for zone, subnets_in_zone in candidates.items():
+                    if not subnets_in_zone:
+                        raise ValueError(f"No subnet available for a new EFS mount target in {zone}")
+                if missing:
+                    time_left()
+                    security_group_id = attach_elastio_sg_to_default_sg()
+                    if not security_group_id:
+                        raise ValueError("No security group available for EFS mount targets")
+                    for zone in sorted(missing):
+                        for subnet_id in candidates[zone]:
+                            time_left()
+                            try:
+                                efs_client.create_mount_target(FileSystemId=file_system_id, SubnetId=subnet_id,
+                                                               SecurityGroups=[security_group_id])
+                            except ClientError as error:
+                                code = error.response['Error']['Code']
+                                if code == 'NoFreeAddressesInSubnet':
+                                    continue
+                                if code != 'MountTargetConflict':
+                                    raise
+                            break
+                        else:
+                            raise RuntimeError(f"No free address for an EFS mount target in {zone}")
+                    time_left()
+                    states = efs_mount_target_states(file_system_id, vpc_id, zone_by_subnet)
+
+                while True:
+                    remaining = time_left()
+                    pending = {zone: states.get(zone, 'missing') for zone in required_zones
+                               if states.get(zone) != 'available'}
+                    if not pending:
+                        return
+                    if any(state in ('error', 'deleting') for state in pending.values()):
+                        raise RuntimeError(f"Unusable EFS mount targets: {pending}")
+                    if remaining <= EFS_POLL_SECONDS:
+                        raise TimeoutError(f"EFS mount target readiness deadline reached; pending zones: {pending}")
+                    time.sleep(EFS_POLL_SECONDS)
+                    time_left()
+                    states = efs_mount_target_states(file_system_id, vpc_id, zone_by_subnet)
 
 
-            def handle_backup_event(event):
+            def handle_backup_event(event, context):
                 """
                 This method is responsible for processing the AWS Backup Events to initiate 
                 an elastio scan
@@ -847,9 +910,14 @@ Resources:
                                                         }
                                             }     
                     
-                            if resource_type in ('EFS'):
+                            if resource_type == 'EFS':
                                 restored_resource_id = get_efs_resource_id(created_resource_arn)
-                                prep_for_efs_restore_test(restored_resource_id)
+                                try:
+                                    prep_for_efs_restore_test(restored_resource_id, context)
+                                except Exception:
+                                    logger.exception("Skipping EFS scan for restore job %s, file system %s",
+                                                     restore_job_id, restored_resource_id)
+                                    return
                             elif resource_type in ('S3'):
                                 if ':::' in created_resource_arn:
                                     restored_resource_id = created_resource_arn.split(':::')[1]
@@ -1598,7 +1666,7 @@ Resources:
                 logger.info(f'Processing Event: {event}, context: {context}')
                 
                 event_handlers = {
-                    'aws.backup': handle_backup_event,
+                    'aws.backup': lambda event: handle_backup_event(event, context),
                     'aws.ec2': handle_ec2_ami_state_change,
                     'elastio.iscan': handle_elastio_iscan_event
                 }
@@ -1819,6 +1887,7 @@ Resources:
               - Effect: Allow
                 Action:
                 - elasticfilesystem:*MountTarget*
+                - elasticfilesystem:DescribeFileSystems
                 Resource: '*' 
           - PolicyName: elastioCfnPermissions
             PolicyDocument:
